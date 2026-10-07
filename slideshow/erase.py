@@ -109,13 +109,19 @@ def strokes_to_mask(strokes, width, height):
                 continue
             xy.append((x, y))
         if xy:
-            prepared.append((rad, xy))
+            prepared.append((rad, xy, bool(s.get("sq"))))
     if not prepared:
         return mask
     cv2 = cv2_module()
-    for rad, xy in prepared:
+    for rad, xy, sq in prepared:
         if cv2 is not None:
-            if len(xy) == 1:
+            if sq:
+                for x, y in xy:
+                    cv2.rectangle(mask, (x - rad, y - rad), (x + rad, y + rad), 255, -1)
+                if len(xy) > 1:
+                    cv2.polylines(mask, [np.array(xy, np.int32)], False, 255,
+                                  thickness=rad * 2, lineType=cv2.LINE_8)
+            elif len(xy) == 1:
                 cv2.circle(mask, xy[0], rad, 255, -1)
             else:
                 cv2.polylines(mask, [np.array(xy, np.int32)], False, 255,

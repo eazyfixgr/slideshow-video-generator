@@ -25,8 +25,11 @@ class MediaEditMixin:
 
     @staticmethod
     def default_edit(m_type):
+        # "rotate" is the clockwise rotation in degrees (0/90/180/270), applied
+        # before crop and erase so every stored coordinate is in that orientation.
         if m_type == "image":
-            return {"crop": None, "brightness": 1.0, "color": 1.0, "erase": None}
+            return {"crop": None, "brightness": 1.0, "color": 1.0, "erase": None,
+                    "rotate": 0}
         # "segments" is the multi-cut timeline: a list of [start, end] kept
         # ranges in seconds. None means the classic single trim_start/trim_end
         # range, which is what every project saved before multi-cut has.
@@ -34,7 +37,7 @@ class MediaEditMixin:
         # "audio": None means "follow the global video_audio setting"; True/False
         # is a per-video override (unmute / mute) set from the Edit dialog.
         return {"crop": None, "trim_start": 0.0, "trim_end": None, "segments": None,
-                "brightness": 1.0, "color": 1.0, "audio": None}
+                "brightness": 1.0, "color": 1.0, "audio": None, "rotate": 0}
 
 
     @classmethod
@@ -83,7 +86,64 @@ class MediaEditMixin:
             return True
         if edit.get("audio") is not None:
             return True
+        if int(edit.get("rotate", 0) or 0) % 360:
+            return True
         return bool(edit.get("erase"))
+
+
+    # ------------------------------------------------------- rotate helpers
+    @staticmethod
+    def _rotate_image(img, deg):
+        """Rotate ``img`` clockwise by ``deg`` (0/90/180/270). Returns a new image."""
+        deg = int(deg) % 360
+        if deg == 90:
+            return img.transpose(Image.Transpose.ROTATE_270)
+        if deg == 180:
+            return img.transpose(Image.Transpose.ROTATE_180)
+        if deg == 270:
+            return img.transpose(Image.Transpose.ROTATE_90)
+        return img
+
+
+    @staticmethod
+    def rotate_crop(crop, deg):
+        """Rotate a normalized crop rect ``[l, t, r, b]`` clockwise with the image."""
+        if not crop or len(crop) != 4:
+            return crop
+        l, t, r, b = [float(v) for v in crop]
+        deg = int(deg) % 360
+        if deg == 90:
+            return [1.0 - b, l, 1.0 - t, r]
+        if deg == 180:
+            return [1.0 - r, 1.0 - b, 1.0 - l, 1.0 - t]
+        if deg == 270:
+            return [t, 1.0 - r, b, 1.0 - l]
+        return list(crop)
+
+
+    @staticmethod
+    def rotate_point(x, y, deg):
+        """Rotate a normalized point clockwise with the image."""
+        x, y = float(x), float(y)
+        deg = int(deg) % 360
+        if deg == 90:
+            return [1.0 - y, x]
+        if deg == 180:
+            return [1.0 - x, 1.0 - y]
+        if deg == 270:
+            return [y, 1.0 - x]
+        return [x, y]
+
+
+    @classmethod
+    def rotate_stroke(cls, stroke, deg):
+        """Rotate one stored erase stroke clockwise with the image."""
+        pts = [cls.rotate_point(p[0], p[1], deg) for p in (stroke.get("pts") or [])
+               if isinstance(p, (list, tuple)) and len(p) >= 2]
+        out = {"r": float(stroke.get("r", 0.02)), "pts": pts}
+        if stroke.get("sq"):
+            out["sq"] = True
+        return out
 
 
     # -------------------------------------------------------- erase (photo)
@@ -226,11 +286,14 @@ class MediaEditMixin:
         thumbnail and export gets them. ``path`` is only used to cache the
         (slow) erase step, and is optional. Always returns a new image.
 
-        Order matters: erase first, while the coordinates still match the
-        original source, then crop and the colour work.
+        Order matters: rotate first, then erase (both use the rotated
+        coordinates), then crop and the colour work.
         """
         edit = edit or {}
         img = img.convert("RGB")
+        rot = int(edit.get("rotate", 0) or 0) % 360
+        if rot:
+            img = self._rotate_image(img, rot)
         img = self._apply_erase(img, edit.get("erase"), path)
         crop = edit.get("crop")
         if crop and len(crop) == 4:
@@ -246,6 +309,23 @@ class MediaEditMixin:
         if abs(c_v - 1.0) > 1e-3:
             img = ImageEnhance.Color(img).enhance(c_v)
         return img
+
+
+    @staticmethod
+    def video_rotate_filter(edit):
+        """ffmpeg filter prefix that rotates a video frame clockwise.
+
+        Applied before the crop, so a crop stored against the rotated frame
+        stays correct. Returns "" for no rotation.
+        """
+        rot = int((edit or {}).get("rotate", 0) or 0) % 360
+        if rot == 90:
+            return "transpose=1,"        # 90 clockwise
+        if rot == 180:
+            return "transpose=2,transpose=2,"
+        if rot == 270:
+            return "transpose=2,"        # 90 counter-clockwise
+        return ""
 
 
     @staticmethod

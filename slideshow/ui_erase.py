@@ -37,16 +37,22 @@ class ErasePanel:
         self.strokes = []
         for s in (edit or {}).get("erase") or []:
             if isinstance(s, dict) and s.get("pts"):
-                self.strokes.append({"r": float(s.get("r", 0.02)),
-                                     "pts": [[float(p[0]), float(p[1])] for p in s["pts"]
-                                             if isinstance(p, (list, tuple)) and len(p) >= 2]})
+                stroke = {"r": float(s.get("r", 0.02)),
+                          "pts": [[float(p[0]), float(p[1])] for p in s["pts"]
+                                  if isinstance(p, (list, tuple)) and len(p) >= 2]}
+                if s.get("sq"):
+                    stroke["sq"] = True
+                self.strokes.append(stroke)
         self.strokes = [s for s in self.strokes if s["pts"]]
         self.work = self.src.copy()
         self.busy = False
         self.token = 0
         self.job = None
+        self._closed = False
         self.painting = None
         self.panning = None
+        self.cursor = None
+        self.square = tk.BooleanVar(value=False)
         self.scale = 1.0
         self.ox = 0.0
         self.oy = 0.0
@@ -63,14 +69,17 @@ class ErasePanel:
         ttk.Label(bar, text="Πινέλο:").pack(side='left')
         self.brush = tk.IntVar(value=40)
         ttk.Scale(bar, from_=BRUSH_MIN, to=BRUSH_MAX, variable=self.brush, length=150,
-                  command=lambda *a: self._brush_label()).pack(side='left', padx=4)
+                  command=lambda *a: self._brush_changed()).pack(side='left', padx=4)
         self.brush_lbl = ttk.Label(bar, text="40 px", width=7)
         self.brush_lbl.pack(side='left')
+        ttk.Checkbutton(bar, text="Τετράγωνο", variable=self.square,
+                        command=self.render_cursor).pack(side='left', padx=(6, 0))
 
         ttk.Button(bar, text="Προσαρμογή", command=self.fit).pack(side='left', padx=(12, 2))
         ttk.Button(bar, text="1:1", command=lambda: self.set_scale(1.0)).pack(side='left', padx=2)
         ttk.Button(bar, text="2:1", command=lambda: self.set_scale(2.0)).pack(side='left', padx=2)
-        ttk.Label(bar, text="   Τροχός = ζουμ, δεξί κλικ = μετακίνηση",
+        ttk.Label(bar, text="   Το σχήμα δείχνει το μέγεθος του πινέλου, τροχός = ζουμ, "
+                            "δεξί κλικ = μετακίνηση",
                   foreground="#777").pack(side='left', padx=6)
 
         self.canvas = tk.Canvas(self.parent, width=CW, height=CH, bg='#111',
@@ -111,11 +120,25 @@ class ErasePanel:
         self.canvas.bind("<B3-Motion>", self._on_pan_move)
         self.canvas.bind("<ButtonRelease-3>", lambda e: setattr(self, "panning", None))
         self.canvas.bind("<MouseWheel>", self._on_wheel)
+        self.canvas.bind("<Motion>", self._on_hover)
+        self.canvas.bind("<Leave>", self._on_leave)
         self._brush_label()
         self.render()
 
     def _brush_label(self):
         self.brush_lbl.config(text=f"{self.brush.get()} px")
+
+    def _brush_changed(self):
+        self._brush_label()
+        self.render_cursor()
+
+    def _on_hover(self, e):
+        self.cursor = (e.x, e.y)
+        self.render_cursor()
+
+    def _on_leave(self, e):
+        self.cursor = None
+        self.canvas.delete('cursor')
 
     # ------------------------------------------------------------- helpers
     @property
@@ -163,7 +186,8 @@ class ErasePanel:
         if self.busy:
             return
         xf, yf = self.to_source(e.x, e.y)
-        self.painting = {"r": self.radius_fraction(), "pts": [[xf, yf]]}
+        self.painting = {"r": self.radius_fraction(), "pts": [[xf, yf]],
+                         "sq": bool(self.square.get())}
         self.strokes.append(self.painting)
         self.render_overlay()
 
@@ -238,9 +262,20 @@ class ErasePanel:
         self.job = self.owner.root.after(delay, self.run_erase)
 
     # -------------------------------------------------------------- erase
+    def close(self):
+        """Abandon this panel (e.g. it is about to be rebuilt after a rotate)."""
+        self._closed = True
+        self.token += 1                 # any in-flight result is now ignored
+        if self.job:
+            try:
+                self.owner.root.after_cancel(self.job)
+            except Exception:
+                pass
+            self.job = None
+
     def run_erase(self):
         self.job = None
-        if self.busy or not self.strokes:
+        if self._closed or self.busy or not self.strokes:
             return
         self.busy = True
         self.token += 1
@@ -264,10 +299,15 @@ class ErasePanel:
         self.owner.root.after(0, lambda: self._done(out, err, token))
 
     def _done(self, out, err, token):
+        if self._closed:
+            return
         self.busy = False
-        self.bar.stop()
-        self.bar.pack_forget()
-        self._set_buttons(True)
+        try:
+            self.bar.stop()
+            self.bar.pack_forget()
+            self._set_buttons(True)
+        except tk.TclError:
+            return                       # the panel was rebuilt/closed meanwhile
         if token != self.token:
             return                       # a newer stroke already superseded this
         if err:
@@ -313,35 +353,52 @@ class ErasePanel:
         self.canvas.create_image(0, 0, image=ref, anchor='nw', tags='base')
         self.render_overlay()
 
+    def _marker(self, x, y, r, sq, **kw):
+        """A brush endpoint: a square for the square brush, else a circle."""
+        if sq:
+            return self.canvas.create_rectangle(x - r, y - r, x + r, y + r, **kw)
+        return self.canvas.create_oval(x - r, y - r, x + r, y + r, **kw)
+
+    def render_cursor(self):
+        """Outline the brush under the pointer, before any click, at its real size."""
+        self.canvas.delete('cursor')
+        if self.busy or self.cursor is None:
+            return
+        x, y = self.cursor
+        r = max(2, int(self.brush.get()))
+        dash = () if self.square.get() else (4, 3)
+        self._marker(x, y, r, self.square.get(), outline='#00e5ff', width=2,
+                     dash=dash, tags='cursor')
+
     def render_overlay(self):
         self.canvas.delete('ovl')
         for s in self.strokes:
             live = s is self.painting
+            sq = bool(s.get("sq"))
             r = max(1.0, s["r"] * max(self.W, self.H) * self.scale)
             pts = [self.to_screen(x, y) for x, y in s["pts"]]
             flat = [c for p in pts for c in p]
+            cap = 'projecting' if sq else 'round'
             if live:
                 # a translucent-looking band (Tk has no alpha, so stipple)
                 if len(flat) >= 4:
                     self.canvas.create_line(*flat, fill=PAINT, width=max(2, int(r * 2)),
-                                            stipple='gray50', capstyle='round',
-                                            tags='ovl')
+                                            stipple='gray50', capstyle=cap, tags='ovl')
                 else:
                     x, y = pts[0]
-                    self.canvas.create_oval(x - r, y - r, x + r, y + r, fill=PAINT,
-                                            stipple='gray50', outline='', tags='ovl')
+                    self._marker(x, y, r, sq, fill=PAINT, stipple='gray50',
+                                 outline='', tags='ovl')
             # a thin dashed trace marks what has already been erased
             if len(flat) >= 4:
                 self.canvas.create_line(*flat, fill=PAINT, width=1, dash=(3, 3),
-                                        capstyle='round', tags='ovl')
+                                        capstyle=cap, tags='ovl')
             x0, y0 = pts[0]
             x1, y1 = pts[-1]
-            self.canvas.create_oval(x0 - r, y0 - r, x0 + r, y0 + r, outline=PAINT,
-                                    width=1, dash=(3, 3), tags='ovl')
+            self._marker(x0, y0, r, sq, outline=PAINT, width=1, dash=(3, 3), tags='ovl')
             if (x0, y0) != (x1, y1):
-                self.canvas.create_oval(x1 - r, y1 - r, x1 + r, y1 + r, outline=PAINT,
-                                        width=1, dash=(3, 3), tags='ovl')
+                self._marker(x1, y1, r, sq, outline=PAINT, width=1, dash=(3, 3), tags='ovl')
         self.canvas.create_rectangle(1, 1, CW - 1, CH - 1, outline='#444', tags='ovl')
+        self.render_cursor()
 
     # -------------------------------------------------------------- output
     def get_strokes(self):
@@ -349,8 +406,11 @@ class ErasePanel:
         for s in self.strokes:
             if len(s["pts"]) < 1:
                 continue
-            out.append({"r": round(float(s["r"]), 6),
-                        "pts": [[round(float(x), 6), round(float(y), 6)] for x, y in s["pts"]]})
+            stroke = {"r": round(float(s["r"]), 6),
+                      "pts": [[round(float(x), 6), round(float(y), 6)] for x, y in s["pts"]]}
+            if s.get("sq"):
+                stroke["sq"] = True
+            out.append(stroke)
         return out
 
 
@@ -457,6 +517,13 @@ class EraseSettingsMixin:
                 note.config(text="Το μοντέλο κατέβηκε. Φορτώνει στο παρασκήνιο...",
                             foreground="#1e7a34")
                 engine.prewarm()
+                messagebox.showinfo(
+                    "Σβήσιμο αντικειμένων",
+                    "Το μοντέλο AI κατέβηκε.\n\n"
+                    "Για να δουλέψει, κλείσε ΠΡΩΤΑ αυτό το παράθυρο και ξανάνοιξε το "
+                    "παράθυρο Edit (φωτογραφίας ή βίντεο). Η πρώτη φόρτωση του μοντέλου "
+                    "κρατά περίπου 20 δευτερόλεπτα.",
+                    parent=dlg)
             refresh()
 
         def start():

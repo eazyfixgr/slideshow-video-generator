@@ -201,8 +201,13 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             "erase_model": "lama",
             # Optional AI text improvement (inert until a key is stored here;
             # the per-project instructions live in the project JSON instead).
+            # ai_provider: "deepseek" (cloud, needs a key) or "local" (an
+            # OpenAI-compatible server on this PC, e.g. Ollama / llama.cpp).
             "ai_enabled": False, "ai_api_key": "", "ai_model": "deepseek-chat",
-            "ai_base_url": DEFAULT_BASE_URL, "ai_global_instructions": ""
+            "ai_base_url": DEFAULT_BASE_URL, "ai_global_instructions": "",
+            "ai_provider": "deepseek",
+            "ai_local_url": "http://localhost:11434/v1",
+            "ai_local_model": "llama3.1"
         }
         if self.settings_file.exists():
             try:

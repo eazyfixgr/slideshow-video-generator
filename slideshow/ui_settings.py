@@ -42,7 +42,7 @@ class SettingsMixin:
         settings_menu.add_command(label="Video Settings", command=self.show_video_settings)
         settings_menu.add_command(label="Photo Settings", command=self.show_photo_settings)
         settings_menu.add_command(label="Text Settings", command=self.show_text_settings)
-        settings_menu.add_command(label="AI / DeepSeek (Βελτίωση κειμένου)", command=self.show_ai_settings)
+        settings_menu.add_command(label="AI (Βελτίωση κειμένου — DeepSeek/Τοπικό)", command=self.show_ai_settings)
         settings_menu.add_command(label="Σβήσιμο αντικειμένων (μοντέλο AI)", command=self.show_erase_settings)
         settings_menu.add_command(label="Watermark / Logo Settings", command=self.show_watermark_settings)
         settings_menu.add_command(label="Project Watermark / Logo (override)",

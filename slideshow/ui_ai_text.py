@@ -17,6 +17,12 @@ from tkinter import ttk, messagebox, scrolledtext
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODELS = ["deepseek-chat", "deepseek-reasoner"]
 
+# A local, OpenAI-compatible server (Ollama by default; llama.cpp's server also
+# speaks this API). Runs entirely on this PC, needs no API key, and keeps the
+# text off the internet - good for Greek and English alike.
+LOCAL_BASE_URL = "http://localhost:11434/v1"
+LOCAL_MODELS = ["llama3.1", "qwen2.5", "gemma2", "mistral", "phi3"]
+
 # The app renders **bold** out of the box, and every newline becomes its own
 # line in the video, so the model is told to respect both.
 SYSTEM_PROMPT = (
@@ -51,14 +57,37 @@ class AITextMixin:
     """Settings, API client and helpers for the optional AI text improvement."""
 
     # ---------------------------------------------------------------- config
+    def ai_provider(self):
+        """Which backend the AI text feature talks to: 'deepseek' or 'local'."""
+        return (self.settings.get("ai_provider") or "deepseek").strip().lower()
+
     def ai_configured(self):
-        """True only when the feature is on AND a key is stored."""
-        return (bool(self.settings.get("ai_enabled"))
-                and bool((self.settings.get("ai_api_key") or "").strip()))
+        """True when the feature is on and its backend is usable.
+
+        The cloud (DeepSeek) backend needs an API key; the local one just needs
+        a URL (the server itself may not be running yet).
+        """
+        if not self.settings.get("ai_enabled"):
+            return False
+        if self.ai_provider() == "local":
+            return bool((self.settings.get("ai_local_url") or "").strip()
+                        or LOCAL_BASE_URL)
+        return bool((self.settings.get("ai_api_key") or "").strip())
 
     def _ai_base_url(self, override=None):
-        base = (override if override is not None else self.settings.get("ai_base_url")) or ""
-        return (base.strip() or DEFAULT_BASE_URL).rstrip("/")
+        if override is not None:
+            base = override
+        elif self.ai_provider() == "local":
+            base = self.settings.get("ai_local_url")
+        else:
+            base = self.settings.get("ai_base_url")
+        fallback = LOCAL_BASE_URL if self.ai_provider() == "local" else DEFAULT_BASE_URL
+        return ((base or "").strip() or fallback).rstrip("/")
+
+    def _ai_model(self):
+        if self.ai_provider() == "local":
+            return (self.settings.get("ai_local_model") or "").strip() or LOCAL_MODELS[0]
+        return (self.settings.get("ai_model") or "").strip() or DEEPSEEK_MODELS[0]
 
     def build_ai_system_prompt(self, project_instructions=""):
         """Global instructions always apply; project ones are added on top."""
@@ -84,7 +113,8 @@ class AITextMixin:
                                      method="POST" if data is not None else "GET")
         req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "application/json")
-        req.add_header("Authorization", f"Bearer {token}")
+        if token:      # the local server needs no key; don't send an empty header
+            req.add_header("Authorization", f"Bearer {token}")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8", errors="replace"))
@@ -133,7 +163,7 @@ class AITextMixin:
                          daemon=True).start()
 
     def _ai_improve_worker(self, text, project_instructions, apply_result, set_busy):
-        model = (self.settings.get("ai_model") or "").strip() or DEEPSEEK_MODELS[0]
+        model = self._ai_model()
         payload = {
             "model": model,
             "messages": [
@@ -165,9 +195,10 @@ class AITextMixin:
         apply_result(result)
 
     # ------------------------------------------------------------ test/test
-    def ai_test_connection(self, key, base_url, set_status, set_busy=None):
+    def ai_test_connection(self, key, base_url, set_status, set_busy=None,
+                           allow_empty_key=False):
         """Check the key against the endpoint's /models route on a worker thread."""
-        if not (key or "").strip():
+        if not (key or "").strip() and not allow_empty_key:
             set_status("Γράψε πρώτα το API key.", "#c0392b")
             return
         if set_busy:
@@ -194,7 +225,7 @@ class AITextMixin:
     # ---------------------------------------------------------- settings UI
     def show_ai_settings(self):
         dlg = tk.Toplevel(self.root)
-        dlg.title("AI / DeepSeek — Βελτίωση κειμένου")
+        dlg.title("AI — Βελτίωση κειμένου (DeepSeek ή Τοπικό)")
         dlg.geometry("680x740")
         dlg.minsize(560, 460)
         dlg.resizable(True, True)
@@ -205,18 +236,31 @@ class AITextMixin:
 
         ttk.Label(body, text="Βελτίωση κειμένου με AI", font=("Calibri", 11, "bold")).pack(
             padx=20, pady=(14, 2), anchor='w')
-        ttk.Label(body, foreground="#555", wraplength=610, justify='left',
-                  text="Το κείμενο που βελτιώνεις στέλνεται στους server του DeepSeek. "
-                       "Το κλειδί αποθηκεύεται σε απλό κείμενο στο settings.json — μην το μοιραστείς."
-                  ).pack(padx=20, anchor='w', pady=(0, 8))
+        intro = ttk.Label(body, foreground="#555", wraplength=610, justify='left')
+        intro.pack(padx=20, anchor='w', pady=(0, 8))
 
         enabled_var = tk.BooleanVar(value=bool(self.settings.get("ai_enabled")))
         ttk.Checkbutton(body, text="Ενεργό — εμφάνιση κουμπιών «Βελτίωση με AI»",
                         variable=enabled_var).pack(padx=20, anchor='w')
 
+        # ---- provider ----------------------------------------------------
+        provider_var = tk.StringVar(value=self.ai_provider())
+        pf = ttk.LabelFrame(body, text=" Πάροχος AI ", padding=8)
+        pf.pack(fill='x', padx=20, pady=(8, 4))
+        ttk.Radiobutton(pf, text="DeepSeek API (διαδίκτυο)", variable=provider_var,
+                        value="deepseek", command=lambda: set_provider()).pack(anchor='w')
+        ttk.Radiobutton(pf, text="Τοπικό — Ollama / llama.cpp (χωρίς αποστολή πουθενά)",
+                        variable=provider_var, value="local",
+                        command=lambda: set_provider()).pack(anchor='w')
+
+        fields = ttk.Frame(body)
+        fields.pack(fill='x', padx=0)
+
+        # DeepSeek fields
+        ds_frame = ttk.Frame(fields)
         key_var = tk.StringVar(value=self.settings.get("ai_api_key", ""))
-        kf = ttk.Frame(body)
-        kf.pack(fill='x', padx=20, pady=(10, 2))
+        kf = ttk.Frame(ds_frame)
+        kf.pack(fill='x', padx=20, pady=(6, 2))
         ttk.Label(kf, text="API key:", width=14).pack(side='left')
         key_entry = ttk.Entry(kf, textvariable=key_var, show='•')
         key_entry.pack(side='left', fill='x', expand=True)
@@ -225,7 +269,7 @@ class AITextMixin:
             key_entry.config(show='' if key_entry.cget('show') else '•')
         ttk.Button(kf, text="👁", width=3, command=toggle_key).pack(side='left', padx=(4, 0))
 
-        mf = ttk.Frame(body)
+        mf = ttk.Frame(ds_frame)
         mf.pack(fill='x', padx=20, pady=4)
         ttk.Label(mf, text="Μοντέλο:", width=14).pack(side='left')
         model_var = tk.StringVar(value=self.settings.get("ai_model", DEEPSEEK_MODELS[0]))
@@ -234,14 +278,53 @@ class AITextMixin:
         ttk.Label(mf, text="  deepseek-chat = γρήγορο, reasoner = καλύτερο κείμενο",
                   foreground="#777").pack(side='left')
 
-        bf = ttk.Frame(body)
+        bf = ttk.Frame(ds_frame)
         bf.pack(fill='x', padx=20, pady=4)
         ttk.Label(bf, text="Base URL:", width=14).pack(side='left')
         base_var = tk.StringVar(value=self.settings.get("ai_base_url", DEFAULT_BASE_URL))
         ttk.Entry(bf, textvariable=base_var).pack(side='left', fill='x', expand=True)
-        ttk.Label(body, foreground="#777", text="Άφησέ το όπως είναι για DeepSeek. "
-                                                "Δουλεύει και με άλλα OpenAI-compatible API.",
-                  ).pack(padx=20, anchor='w')
+        ttk.Label(ds_frame, foreground="#777", wraplength=610, justify='left',
+                  text="Το κείμενο στέλνεται στους server του DeepSeek. Το κλειδί αποθηκεύεται "
+                       "σε απλό κείμενο στο settings.json — μην το μοιραστείς."
+                  ).pack(padx=20, anchor='w', pady=(0, 4))
+
+        # Local fields
+        loc_frame = ttk.Frame(fields)
+        luf = ttk.Frame(loc_frame)
+        luf.pack(fill='x', padx=20, pady=(6, 2))
+        ttk.Label(luf, text="Server URL:", width=14).pack(side='left')
+        local_url_var = tk.StringVar(value=self.settings.get("ai_local_url", LOCAL_BASE_URL))
+        ttk.Entry(luf, textvariable=local_url_var).pack(side='left', fill='x', expand=True)
+
+        lmf = ttk.Frame(loc_frame)
+        lmf.pack(fill='x', padx=20, pady=4)
+        ttk.Label(lmf, text="Μοντέλο:", width=14).pack(side='left')
+        local_model_var = tk.StringVar(value=self.settings.get("ai_local_model", LOCAL_MODELS[0]))
+        ttk.Combobox(lmf, textvariable=local_model_var, values=LOCAL_MODELS,
+                     width=26).pack(side='left')
+        ttk.Label(lmf, text="  π.χ. llama3.1, qwen2.5, gemma2", foreground="#777").pack(side='left')
+
+        ttk.Label(loc_frame, foreground="#777", wraplength=610, justify='left',
+                  text="Τρέξε στον υπολογιστή σου έναν OpenAI-compatible server:\n"
+                       "  • Ollama:  ollama serve   και μετά   ollama pull llama3.1\n"
+                       "  • llama.cpp:  llama-server --port 8080  →  URL http://localhost:8080/v1\n"
+                       "Το κείμενο δεν φεύγει ποτέ από τον υπολογιστή σου. Η ποιότητα εξαρτάται "
+                       "από το μοντέλο — για ελληνικά δοκίμασε qwen2.5."
+                  ).pack(padx=20, anchor='w', pady=(0, 4))
+
+        def set_provider():
+            if provider_var.get() == "local":
+                intro.config(text="Τοπικό AI: το κείμενο βελτιώνεται τοπικά, χωρίς αποστολή "
+                                   "στο διαδίκτυο. Χρειάζεται ένας τοπικός server (βλ. παρακάτω).")
+                ds_frame.pack_forget()
+                loc_frame.pack(fill='x')
+            else:
+                intro.config(text="Το κείμενο που βελτιώνεις στέλνεται στους server του DeepSeek. "
+                                   "Το κλειδί αποθηκεύεται σε απλό κείμενο στο settings.json — "
+                                   "μην το μοιραστείς.")
+                loc_frame.pack_forget()
+                ds_frame.pack(fill='x')
+        set_provider()
 
         ttk.Separator(body).pack(fill='x', padx=20, pady=(12, 6))
         ttk.Label(body, text="Παγκόσμιες οδηγίες (ισχύουν σε όλα τα projects)",
@@ -267,17 +350,26 @@ class AITextMixin:
 
         def do_test():
             set_status("Έλεγχος...", "#333")
-            self.ai_test_connection(key_var.get(), base_var.get(), set_status,
-                                    set_busy=lambda b: test_btn.config(state='disabled' if b else 'normal'))
+            if provider_var.get() == "local":
+                key, base, empty = "", local_url_var.get(), True
+            else:
+                key, base, empty = key_var.get(), base_var.get(), False
+            self.ai_test_connection(
+                key, base, set_status,
+                set_busy=lambda b: test_btn.config(state='disabled' if b else 'normal'),
+                allow_empty_key=empty)
         test_btn = ttk.Button(btns, text="Δοκιμή σύνδεσης", command=do_test)
         test_btn.pack(side='left')
 
         def save():
             self.settings.update({
                 "ai_enabled": bool(enabled_var.get()),
+                "ai_provider": provider_var.get(),
                 "ai_api_key": key_var.get().strip(),
                 "ai_model": model_var.get().strip() or DEEPSEEK_MODELS[0],
                 "ai_base_url": base_var.get().strip() or DEFAULT_BASE_URL,
+                "ai_local_url": local_url_var.get().strip() or LOCAL_BASE_URL,
+                "ai_local_model": local_model_var.get().strip() or LOCAL_MODELS[0],
                 "ai_global_instructions": glob.get("1.0", tk.END).strip(),
             })
             self.save_settings()

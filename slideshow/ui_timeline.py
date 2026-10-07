@@ -123,6 +123,7 @@ class TimelineMixin:
                  "strip": None, "strip_refs": [], "prev": None,
                  "frame": None,
                  "audio": edit.get("audio"),
+                 "rotate": int(edit.get("rotate", 0) or 0) % 360,
                  "main_max": (MAIN_W, MAIN_H)}
 
         ttk.Label(dlg, text="Η γραμμή χρόνου δείχνει όλο το βίντεο. Σύρε πάνω στο filmstrip ή στον "
@@ -329,7 +330,9 @@ class TimelineMixin:
             if disp is None:
                 canvas.create_text(MAIN_W // 2, MAIN_H // 2, text="Φόρτωση καρέ...", fill='white')
                 return
-            disp = self._apply_image_edit(disp, self._tl_color_edit(color_ui), m_type="video")
+            edit = self._tl_color_edit(color_ui)
+            edit["rotate"] = state["rotate"]
+            disp = self._apply_image_edit(disp, edit, m_type="video")
             canvas.config(width=disp.width, height=disp.height)
             ref = ImageTk.PhotoImage(disp)
             canvas.img_ref = ref
@@ -473,8 +476,15 @@ class TimelineMixin:
             state["crop"] = None
             render_main()
 
+        def rotate_video(delta):
+            state["rotate"] = (state["rotate"] + delta) % 360
+            if state["crop"]:
+                state["crop"] = self.rotate_crop(state["crop"], delta)
+            render_main()
+
         def reset_all():
             state["crop"] = None
+            state["rotate"] = 0
             state["play"] = 0.0
             state["seg"] = 0
             bounds[:] = [0.0, duration]
@@ -573,6 +583,7 @@ class TimelineMixin:
                 return
             target = self.media_files[idx][2]
             target["crop"] = list(state["crop"]) if state["crop"] else None
+            target["rotate"] = int(state["rotate"]) % 360
             brightness, color = color_ui.values()
             target["brightness"] = brightness
             target["color"] = color
@@ -616,6 +627,8 @@ class TimelineMixin:
         ttk.Button(btns, text="Διαγραφή σημείου", command=delete_point).pack(side='left', padx=3)
         ttk.Button(btns, text="ΚΡΑΤΑ / ΠΕΤΑ", command=lambda: toggle_seg(state["seg"])).pack(side='left', padx=3)
         ttk.Button(btns, text="Καθαρισμός crop", command=clear_crop).pack(side='left', padx=3)
+        ttk.Button(btns, text="↺ Αριστερά", command=lambda: rotate_video(-90)).pack(side='left', padx=3)
+        ttk.Button(btns, text="↻ Δεξιά", command=lambda: rotate_video(90)).pack(side='left', padx=3)
         ttk.Button(btns, text="Επαναφορά", command=reset_all).pack(side='left', padx=3)
         ttk.Button(btns, text="Άκυρο", command=lambda: (player.stop(), dlg.destroy())).pack(side='right', padx=3)
         ttk.Button(btns, text="Εφαρμογή", command=apply_and_close).pack(side='right', padx=3)

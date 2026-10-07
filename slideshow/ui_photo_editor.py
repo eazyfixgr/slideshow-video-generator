@@ -31,16 +31,26 @@ class PhotoEditorMixin:
         nb.add(tab_erase, text="  🧽  Σβήσιμο  ")
 
         # ============================ tab 1: crop / brightness / colour
-        prev_src = src.copy()
+        # The crop and the erase strokes are stored against the *rotated* image,
+        # so rotation happens first in the render pipeline (_apply_image_edit).
+        state = {"crop": list(edit["crop"]) if edit.get("crop") else None,
+                 "drag": None,
+                 "rotate": int(edit.get("rotate", 0) or 0) % 360}
+        panel_holder = {}
+
+        def base_image():
+            return self._rotate_image(src, state["rotate"])
+
+        prev_src = base_image()
         prev_src.thumbnail((840, 690))   # 50% bigger than the old 560x460
         pw, ph = prev_src.size
-        state = {"crop": list(edit["crop"]) if edit.get("crop") else None, "drag": None}
 
         brightness_var = tk.DoubleVar(value=float(edit.get("brightness", 1.0) or 1.0))
         color_var = tk.DoubleVar(value=float(edit.get("color", 1.0) or 1.0))
 
         ttk.Label(tab_crop, text="Σύρε το ποντίκι πάνω στην εικόνα για crop. Η προεπισκόπηση "
-                                 "δείχνει αμέσως φωτεινότητα και χρώμα.",
+                                 "δείχνει αμέσως φωτεινότητα και χρώμα. Με ↺/↻ περιστρέφεις "
+                                 "τη φωτογραφία.",
                   foreground="#555").pack(padx=12, pady=(10, 0), anchor='w')
 
         canvas = tk.Canvas(tab_crop, width=pw, height=ph, bg='black', cursor='crosshair',
@@ -75,14 +85,17 @@ class PhotoEditorMixin:
                 return max(1, int(sw * 0.80)), max(1, int(sh * 0.72))
             return 840, 690
 
-        def recompute_preview(full):
-            """Re-fit the preview to the window size (normal 1.5x, or fullscreen)."""
+        def refit_preview():
             nonlocal prev_src, pw, ph
-            p = src.copy()
-            p.thumbnail(preview_max(full))
+            p = base_image()
+            p.thumbnail(preview_max(bool(self.settings.get("edit_fullscreen", False))))
             prev_src = p
             pw, ph = p.size
             canvas.config(width=pw, height=ph)
+
+        def recompute_preview(full):
+            """Re-fit the preview to the window size (normal 1.5x, or fullscreen)."""
+            refit_preview()
             render_all()
 
         def on_press(e):
@@ -113,13 +126,41 @@ class PhotoEditorMixin:
         size_lbl.pack(padx=12, anchor='w')
 
         def update_size_lbl():
+            bw, bh = base_image().size
             crop = state["crop"]
             if crop:
-                w = int(round((crop[2] - crop[0]) * src.width))
-                h = int(round((crop[3] - crop[1]) * src.height))
-                size_lbl.config(text=f"Crop: {w} x {h} px  (από {src.width} x {src.height})")
+                w = int(round((crop[2] - crop[0]) * bw))
+                h = int(round((crop[3] - crop[1]) * bh))
+                size_lbl.config(text=f"Crop: {w} x {h} px  (από {bw} x {bh})")
             else:
-                size_lbl.config(text=f"Χωρίς crop — {src.width} x {src.height} px")
+                size_lbl.config(text=f"Χωρίς crop — {bw} x {bh} px")
+
+        # ---- rotation (rotates crop + erase strokes with the image) ------
+        def rebuild_erase_panel(strokes):
+            for w in tab_erase.winfo_children():
+                w.destroy()
+            panel_holder["panel"] = ErasePanel(self, tab_erase,
+                                               {"erase": strokes}, base_image(), path)
+
+        def do_rotate(delta):
+            state["rotate"] = (state["rotate"] + delta) % 360
+            if state["crop"]:
+                state["crop"] = self.rotate_crop(state["crop"], delta)
+            panel = panel_holder.get("panel")
+            strokes = [self.rotate_stroke(s, delta) for s in panel.get_strokes()] if panel else []
+            if panel:
+                panel.close()
+            refit_preview()
+            rebuild_erase_panel(strokes)
+            render_all()
+
+        rot_row = ttk.Frame(tab_crop)
+        rot_row.pack(padx=12, pady=(0, 2), anchor='w')
+        ttk.Label(rot_row, text="Περιστροφή:").pack(side='left')
+        ttk.Button(rot_row, text="↺ 90° αριστερά",
+                   command=lambda: do_rotate(-90)).pack(side='left', padx=4)
+        ttk.Button(rot_row, text="↻ 90° δεξιά",
+                   command=lambda: do_rotate(90)).pack(side='left', padx=4)
 
         sl = ttk.Frame(tab_crop)
         sl.pack(fill='x', padx=14, pady=(6, 2))
@@ -174,7 +215,12 @@ class PhotoEditorMixin:
         render_all()
 
         # ============================ tab 2: erase
-        panel = ErasePanel(self, tab_erase, edit, src, path)
+        rebuild_erase_panel(edit.get("erase") or [])
+
+        def _on_destroy(e):
+            if e.widget is dlg and panel_holder.get("panel"):
+                panel_holder["panel"].close()
+        dlg.bind("<Destroy>", _on_destroy)
 
         # ============================ shared buttons
         btns = ttk.Frame(dlg)
@@ -185,7 +231,8 @@ class PhotoEditorMixin:
             target["crop"] = list(state["crop"]) if state["crop"] else None
             target["brightness"] = round(brightness_var.get(), 4)
             target["color"] = round(color_var.get(), 4)
-            strokes = panel.get_strokes()
+            target["rotate"] = int(state["rotate"]) % 360
+            strokes = panel_holder["panel"].get_strokes()
             target["erase"] = strokes or None
             if apply_crop_var.get():
                 for item in self.media_files:

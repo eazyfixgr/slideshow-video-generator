@@ -134,14 +134,15 @@ class ExportMixin:
                     first_f = self._apply_image_edit(self._video_first_frame(path), edit, m_type="video")
                     self._create_blur_bg(first_f, width, height).save(str(bg_p), "PNG")
 
-                    # Crop first (fractions of the source), then the usual fit.
+                    # Rotate, then crop (fractions of the rotated source), then fit.
+                    rotate_part = self.video_rotate_filter(edit)
                     crop_part = self.video_crop_filter(edit)
                     color_part = self.video_color_filter(edit)
 
                     if self.settings["cropping"]:
-                        vf = crop_part + f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
+                        vf = rotate_part + crop_part + f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
                     else:
-                        vf = crop_part + f"scale={width}:{height}:force_original_aspect_ratio=decrease"
+                        vf = rotate_part + crop_part + f"scale={width}:{height}:force_original_aspect_ratio=decrease"
                     if color_part:
                         vf += "," + color_part
 
