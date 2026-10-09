@@ -33,12 +33,46 @@ class ExportMixin:
                 "Παρακαλώ γράψε ένα όνομα για το project πριν κάνεις Generate Video!"
             )
             return
-        out = Path(self.out_var.get()) / f"{n}.mp4"
+        out_folder = self.out_var.get().strip()
+        if not out_folder:
+            if not self._ensure_output_folder():
+                return
+            out_folder = self.out_var.get().strip()
+        out = Path(out_folder) / f"{n}.mp4"
         self._export_cancel = False
         if getattr(self, "cancel_btn", None) is not None:
             self.cancel_btn.config(state='normal')
         self.status.config(text="Exporting...")
         threading.Thread(target=self._export_task, args=(out,), daemon=True).start()
+
+
+    def _ensure_output_folder(self):
+        """Handle an empty output field before exporting.
+
+        Older projects can carry an empty ``out`` value, which used to make the
+        export write a *relative* path into the process working directory (often
+        read-only, hence "Permission denied"). Offer the Desktop, or let the
+        user pick a folder themselves.
+        """
+        desktop = Path(os.path.expanduser("~")) / "Desktop"
+        target = desktop if desktop.is_dir() else Path(os.path.expanduser("~"))
+        if messagebox.askokcancel(
+            "Λείπει φάκελος εξόδου",
+            "Δεν έχεις ορίσει φάκελο εξόδου για το βίντεο.\n\n"
+            f"Πάτα OK για αποθήκευση στην Επιφάνεια Εργασίας:\n{target}\n\n"
+            "ή Ακύρωση για να διαλέξεις εσύ φάκελο."
+        ):
+            self.out_var.set(str(target))
+            self.settings["output_folder"] = str(target)
+            self.save_settings()
+            return True
+        folder = filedialog.askdirectory(title="Διάλεξε φάκελο εξόδου")
+        if not folder:
+            return False
+        self.out_var.set(folder)
+        self.settings["output_folder"] = folder
+        self.save_settings()
+        return True
 
 
     def cancel_export(self):
