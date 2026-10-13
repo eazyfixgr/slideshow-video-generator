@@ -144,9 +144,15 @@ class ExportMixin:
                             img, fit_move_data, temp_dir, i, width, height, image_duration, clip_path
                         )
                 else:
-                    v = VideoFileClip(path)
-                    full_dur = v.duration
-                    v.close()
+                    # Duration via ffprobe. MoviePy's VideoFileClip reads a full
+                    # frame just to open the clip and can fail on files ffmpeg
+                    # itself handles fine (e.g. some phone/Drive videos),
+                    # leaving the whole export stuck.
+                    full_dur = self._video_duration(path)
+                    if full_dur <= 0:
+                        raise RuntimeError(
+                            f"Δεν μπόρεσα να διαβάσω τη διάρκεια του βίντεο:\n{path}"
+                        )
 
                     # Trim: non-destructive. One kept range keeps using the
                     # classic input-seek fast path; several ranges (the
