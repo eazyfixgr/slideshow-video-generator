@@ -153,7 +153,8 @@ class TimelineMixin:
 
         player = VideoPreviewPlayer(self.root, path, MAIN_W, MAIN_H,
                                     on_frame=lambda img, t: show_play_frame(img, t),
-                                    on_finish=lambda: play_finished())
+                                    on_finish=lambda: play_finished(),
+                                    post_ui=self._post_ui)
 
         tl = tk.Canvas(dlg, width=TL_W, height=STRIP_H + BAR_H + RULER_H, bg='#1c1c1c',
                        highlightthickness=1, highlightbackground='#888', cursor='hand2')
@@ -390,7 +391,7 @@ class TimelineMixin:
                 f = self._video_frame_at(path, t)
             except Exception:
                 f = None
-            self.root.after(0, lambda: apply_frames(f))
+            self._post_ui(apply_frames, f)
 
         def apply_frames(f):
             status_lbl.config(text="")
@@ -422,7 +423,7 @@ class TimelineMixin:
                     cached[key] = cells
             cells = cached.get(key)
             if cells:
-                self.root.after(0, lambda: set_strip(cells))
+                self._post_ui(set_strip, cells)
 
         def set_strip(cells):
             state["strip"] = cells

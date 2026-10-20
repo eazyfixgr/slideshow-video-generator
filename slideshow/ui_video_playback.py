@@ -16,8 +16,11 @@ from .deps import Image
 class VideoPreviewPlayer:
     """Streams a video into ``on_frame(image, seconds)`` on the Tk main thread."""
 
-    def __init__(self, root, path, width, height, on_frame, on_finish=None, fps=15):
+    def __init__(self, root, path, width, height, on_frame, on_finish=None, fps=15,
+                 post_ui=None):
         self.root = root
+        self._post_ui = post_ui or (lambda func, *args, **kwargs: root.after(0, func,
+                                                                            *args, **kwargs))
         self.path = str(path)
         self.width = max(2, int(width))
         self.height = max(2, int(height))
@@ -83,7 +86,7 @@ class VideoPreviewPlayer:
         try:
             proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         except Exception:
-            self.root.after(0, self._finish)
+            self._post_ui(self._finish)
             return
         self._proc = proc
         frame_bytes = w * h * 3
@@ -94,7 +97,7 @@ class VideoPreviewPlayer:
                 if not data or len(data) < frame_bytes:
                     break
                 img = Image.frombytes("RGB", (w, h), data)
-                self.root.after(0, self.on_frame, img, start + idx / self.fps)
+                self._post_ui(self.on_frame, img, start + idx / self.fps)
                 idx += 1
         except Exception:
             pass
@@ -110,7 +113,7 @@ class VideoPreviewPlayer:
                     pass
                 self._audio = None
             self._proc = None
-            self.root.after(0, self._finish)
+            self._post_ui(self._finish)
 
     def _finish(self):
         if self.on_finish:

@@ -53,25 +53,25 @@ class PreviewMixin:
             photo_item = next((it for it in self.media_files if it[0] == "image"), None)
             video_item = next((it for it in self.media_files if it[0] == "video"), None)
             if photo_item is None and video_item is None:
-                self.root.after(0, lambda: messagebox.showinfo("Preview", "Δεν υπάρχουν media για preview."))
+                self._post_ui(messagebox.showinfo, "Preview", "Δεν υπάρχουν media για preview.")
                 return
 
             if photo_item is not None:
                 self._render_preview(photo_item[1], "image", w, h, self.preview_photo_canvas, photo_item[2])
             else:
-                self.root.after(0, lambda: self._clear_preview(self.preview_photo_canvas))
+                self._post_ui(self._clear_preview, self.preview_photo_canvas)
             if video_item is not None:
                 # For a trimmed video the export starts at trim_start, so preview that frame.
                 t_start = float(video_item[2].get("trim_start") or 0.0)
                 self._render_preview(video_item[1], "video", w, h, self.preview_video_canvas,
                                      video_item[2], t_start)
             else:
-                self.root.after(0, lambda: self._clear_preview(self.preview_video_canvas))
+                self._post_ui(self._clear_preview, self.preview_video_canvas)
         except Exception as e:
             # Bind the text now: the `except ... as e` name is cleared when the
             # block ends, so a lambda captured over `e` would fail later.
             err = str(e)
-            self.root.after(0, lambda: messagebox.showerror("Error", err))
+            self._post_ui(messagebox.showerror, "Error", err)
 
 
     @staticmethod
@@ -152,7 +152,7 @@ class PreviewMixin:
         # Pass the PIL image through after(); PhotoImage must be built in the
         # main thread, not in this worker thread. The display size is chosen
         # later from the canvas' real size, so it follows window resizing.
-        self.root.after(0, lambda: self._show_preview(canvas, full))
+        self._post_ui(self._show_preview, canvas, full)
 
 
     def _show_preview(self, canvas, full):

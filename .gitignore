@@ -17,6 +17,7 @@ temp/
 erase_cache/
 ffmpeg/
 install_log.txt
+crash.log
 logo.jpg
 
 # Build output

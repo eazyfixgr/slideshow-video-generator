@@ -4,11 +4,14 @@ The feature code lives in mixins; this class just composes them, so every
 `self.<method>` keeps working exactly as it did in the single-file version.
 """
 
+import faulthandler
 import json
 import os
+import queue
 import re
 import sys
 import threading
+import traceback
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
@@ -59,6 +62,14 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         self.projects_dir.mkdir(exist_ok=True)
         self.temp_dir.mkdir(exist_ok=True)
 
+        # Tkinter is single-threaded: worker threads must never touch widgets or
+        # call `after()` directly (that can crash the whole interpreter). They
+        # enqueue callables here and the main thread drains the queue.
+        self._ui_queue = queue.Queue()
+        self._ui_pump_job = None
+        self._crash_log_file = None
+        self._enable_crash_logging()
+
         self.current_project = None
         self.media_files = []
         self.is_modified = False
@@ -98,7 +109,64 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         except Exception:
             pass
 
+        self.root.report_callback_exception = self._report_callback_exception
+        self._ui_pump_job = self.root.after(25, self._pump_ui_queue)
+
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+
+    def _enable_crash_logging(self):
+        """Keep a native traceback in crash.log if the process dies hard."""
+        try:
+            self._crash_log_file = open(self.app_dir / "crash.log", "a",
+                                        encoding="utf-8", buffering=1)
+            faulthandler.enable(file=self._crash_log_file, all_threads=True)
+        except Exception:
+            self._crash_log_file = None
+
+
+    def _report_callback_exception(self, exc, val, tb):
+        """Log Tk callback errors instead of dying silently (frozen builds)."""
+        try:
+            if self._crash_log_file is not None:
+                self._crash_log_file.write("\n--- Tkinter callback error ---\n")
+                traceback.print_exception(exc, val, tb, file=self._crash_log_file)
+        except Exception:
+            pass
+        try:
+            messagebox.showerror("Error", f"{exc.__name__}: {val}")
+        except Exception:
+            pass
+
+
+    def _post_ui(self, func, *args, **kwargs):
+        """Run ``func`` on the Tk main thread from any thread (thread-safe)."""
+        self._ui_queue.put((func, args, kwargs))
+
+
+    def _pump_ui_queue(self):
+        self._ui_pump_job = None
+        while True:
+            try:
+                func, args, kwargs = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                func(*args, **kwargs)
+            except Exception:
+                try:
+                    traceback.print_exc()
+                except Exception:
+                    pass
+                if self._crash_log_file is not None:
+                    try:
+                        traceback.print_exc(file=self._crash_log_file)
+                    except Exception:
+                        pass
+        try:
+            self._ui_pump_job = self.root.after(25, self._pump_ui_queue)
+        except tk.TclError:
+            self._ui_pump_job = None
 
 
     def setup_shortcuts(self):
@@ -291,6 +359,11 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             "enabled": False, "path": "", "position": "bottom_right",
             "size_pct": 15, "opacity": 80
         }
+        self._video_frame_cache.clear()
+        self._video_dur_cache.clear()
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self.selected_indices = set()
         self.update_media_display()
 
 
@@ -400,23 +473,39 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             selected_name = lb.get(lb.curselection()[0])
             for idx, p in enumerate(pfs):
                 if display_name(p) == selected_name:
-                    with open(p, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        self.name_var.set(data.get("name", ""))
-                        self.media_files = self.normalize_media_list(
-                            data.get("media_files", data.get("media", [])))
-                        old_text = data.get("text", "")
-                        self.project_text_videos = data.get("text_videos", old_text)
-                        self.project_text_photos = data.get("text_photos", "")
-                        self.project_ai_instructions = data.get("ai_instructions", "")
-                        self.out_var.set(data.get("out", ""))
-                        self.project_watermark = data.get("project_watermark", {
-                            "enabled": False, "path": "", "position": "bottom_right",
-                            "size_pct": 15, "opacity": 80
-                        })
-                        self.is_modified = False
-                        self.update_media_display()
-                        d.destroy()
+                    try:
+                        # utf-8-sig tolerates projects saved with a BOM.
+                        with open(p, 'r', encoding='utf-8-sig') as f:
+                            data = json.load(f)
+                        if not isinstance(data, dict):
+                            raise ValueError("Το αρχείο δεν είναι έγκυρο project.")
+                    except Exception as e:
+                        messagebox.showerror(
+                            "Load Project",
+                            f"Δεν μπόρεσα να φορτώσω το project '{selected_name}':\n{e}")
+                        return
+                    self.name_var.set(data.get("name", ""))
+                    self.media_files = self.normalize_media_list(
+                        data.get("media_files", data.get("media", [])))
+                    old_text = data.get("text", "")
+                    self.project_text_videos = data.get("text_videos", old_text)
+                    self.project_text_photos = data.get("text_photos", "")
+                    self.project_ai_instructions = data.get("ai_instructions", "")
+                    self.out_var.set(data.get("out", ""))
+                    self.project_watermark = data.get("project_watermark", {
+                        "enabled": False, "path": "", "position": "bottom_right",
+                        "size_pct": 15, "opacity": 80
+                    })
+                    self.is_modified = False
+                    # Do not carry caches / undo history over from the previous
+                    # project: they would grow memory and Undo could restore it.
+                    self._video_frame_cache.clear()
+                    self._video_dur_cache.clear()
+                    self._undo_stack.clear()
+                    self._redo_stack.clear()
+                    self.selected_indices = set()
+                    self.update_media_display()
+                    d.destroy()
                     break
         
         def do_duplicate():

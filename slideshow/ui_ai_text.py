@@ -181,9 +181,9 @@ class AITextMixin:
                 raise RuntimeError("Το AI δεν επέστρεψε κείμενο. Δοκίμασε ξανά.")
         except Exception as e:
             err = str(e)   # bound before the lambda: `e` is cleared at block end
-            self.root.after(0, lambda: self._ai_done(None, set_busy, apply_result, err))
+            self._post_ui(self._ai_done, None, set_busy, apply_result, err)
             return
-        self.root.after(0, lambda: self._ai_done(out, set_busy, apply_result, None))
+        self._post_ui(self._ai_done, out, set_busy, apply_result, None)
 
     def _ai_done(self, result, set_busy, apply_result, error):
         """Back on the Tk main thread: restore the UI, then show or apply."""
@@ -215,7 +215,7 @@ class AITextMixin:
             color = "#1e7a34"
         except Exception as e:
             msg, color = str(e), "#c0392b"
-        self.root.after(0, lambda: self._ai_test_done(msg, color, set_status, set_busy))
+        self._post_ui(self._ai_test_done, msg, color, set_status, set_busy)
 
     def _ai_test_done(self, msg, color, set_status, set_busy):
         if set_busy:

@@ -296,7 +296,7 @@ class ErasePanel:
             err = None
         except Exception as e:
             out, err = None, str(e)
-        self.owner.root.after(0, lambda: self._done(out, err, token))
+        self.owner._post_ui(self._done, out, err, token)
 
     def _done(self, out, err, token):
         if self._closed:
@@ -497,15 +497,15 @@ class EraseSettingsMixin:
                 pct = (done / total * 100) if total else 0
                 txt = f"{done / 1048576:.0f} / {total / 1048576:.0f} MB" if total else \
                       f"{done / 1048576:.0f} MB"
-                self.root.after(0, lambda: (bar.config(value=pct),
-                                            note.config(text=txt)))
+                self._post_ui(lambda: (bar.config(value=pct),
+                                       note.config(text=txt)))
             try:
                 download_model(self.app_dir / MODEL_DIR_NAME, model_var.get(), prog,
                                lambda: cancel["v"])
-                self.root.after(0, lambda: finished(None))
+                self._post_ui(finished, None)
             except Exception as e:
                 err = str(e)   # bound before the lambda: `e` is cleared at block end
-                self.root.after(0, lambda: finished(err))
+                self._post_ui(finished, err)
 
         def finished(err):
             set_busy(False)

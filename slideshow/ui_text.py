@@ -296,8 +296,8 @@ class TextInputMixin:
                     out.append((canvas, self._render_with_text(img, m_type, text, w, h)))
                 except Exception:
                     out.append((canvas, None))
-            self.root.after(0, lambda: [self._show_dialog_preview(c, f, w, h)
-                                        for c, f in out])
+            self._post_ui(lambda: [self._show_dialog_preview(c, f, w, h)
+                                   for c, f in out])
         threading.Thread(target=worker, daemon=True).start()
 
 

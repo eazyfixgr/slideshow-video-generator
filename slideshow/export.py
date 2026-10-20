@@ -120,7 +120,8 @@ class ExportMixin:
             for i, (m_type, path, edit) in enumerate(self.media_files):
                 if self._export_cancel:
                     raise RuntimeError("cancelled")
-                self.progress_var.set((i / len(self.media_files)) * 50)
+                self._post_ui(self.progress_var.set,
+                              (i / len(self.media_files)) * 50)
                 clip_path = temp_dir / f"clip_{i:04d}.mp4"
                 segs = None
 
@@ -236,14 +237,14 @@ class ExportMixin:
                                  f"dur={clip_dur:.2f}s")
 
             # Merge clips with transitions
-            self.progress_var.set(60)
+            self._post_ui(self.progress_var.set, 60)
             merged = temp_dir / "merged.mp4"
             self._build_merged_with_transitions(clip_files, clip_durations, temp_dir, merged)
             self._log_export(f"merge: {len(clip_files)} clips, total {total_duration:.1f}s, "
                              f"merged={'OK' if merged.exists() else 'FAILED'}")
 
             # Apply watermark
-            self.progress_var.set(75)
+            self._post_ui(self.progress_var.set, 75)
             merged_wm = temp_dir / "merged_wm.mp4"
             self._apply_watermark(merged, merged_wm, width, height, temp_dir)
 
@@ -268,7 +269,7 @@ class ExportMixin:
             voice_path = self._build_video_audio_track(audio_specs, clip_durations,
                                                        video_dur, temp_dir)
             self.finalize_audio_ffmpeg(merged_wm, out_path, video_dur, temp_dir, voice_path)
-            self.progress_var.set(100)
+            self._post_ui(self.progress_var.set, 100)
             if getattr(self, '_export_music_missing', False):
                 if getattr(self, '_export_voice_used', False):
                     note = "\n\nΣημείωση: δεν βρέθηκε μουσική — ακούγεται μόνο ο ήχος των βίντεο."
@@ -276,25 +277,24 @@ class ExportMixin:
                     note = "\n\nΣημείωση: δεν βρέθηκε μουσική, το βίντεο είναι χωρίς ήχο."
             else:
                 note = ""
-            self.root.after(0, lambda: messagebox.showinfo("Done", "Export Complete!" + note))
+            self._post_ui(messagebox.showinfo, "Done", "Export Complete!" + note)
         except Exception as e:
             self._log_export(f"EXPORT ERROR: {e}")
             if self._export_cancel:
                 self._log_export("EXPORT CANCELLED by user")
-                self.root.after(0, lambda: messagebox.showinfo(
-                    "Export", "Η εξαγωγή ακυρώθηκε."))
+                self._post_ui(messagebox.showinfo, "Export", "Η εξαγωγή ακυρώθηκε.")
             else:
                 self._log_export(traceback.format_exc())
                 # Bind the text now: Python clears the `except ... as e` name when
                 # the block ends, so a lambda captured over `e` would fail later.
                 err_msg = str(e)
-                self.root.after(0, lambda: messagebox.showerror("Error", err_msg))
+                self._post_ui(messagebox.showerror, "Error", err_msg)
         finally:
             self._export_cancel = False
             self._export_proc = None
             if getattr(self, "cancel_btn", None) is not None:
-                self.root.after(0, lambda: self.cancel_btn.config(state='disabled'))
-            self.root.after(0, lambda: self.status.config(text="Ready"))
+                self._post_ui(lambda: self.cancel_btn.config(state='disabled'))
+            self._post_ui(lambda: self.status.config(text="Ready"))
 
 
     def _log_export(self, msg):
@@ -418,7 +418,8 @@ class ExportMixin:
         try:
             r = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
                                 '-of', 'default=noprint_wrappers=1:nokey=1', str(path)],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True,
+                               encoding='utf-8', errors='replace')
             d = float(r.stdout.strip())
             return d if d > 0 else default
         except Exception:
