@@ -463,12 +463,22 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             for p in pfs:
                 if search_text in display_name(p).lower():
                     lb.insert(tk.END, display_name(p))
+            # Reset the scroll position after rebuilding the list: otherwise a
+            # list scrolled to the bottom shows a blank area when the filter
+            # returns only a few results, and the project looks "missing".
+            if lb.size():
+                lb.yview_moveto(0)
+                lb.selection_clear(0, tk.END)
+                lb.selection_set(0)
+                lb.activate(0)
         
         search_var.trace_add('write', filter_projects)
         
         def do_load():
             if not lb.curselection():
-                return
+                if not lb.size():
+                    return
+                lb.selection_set(0)
             # Find the actual index in pfs matching the selected display name
             selected_name = lb.get(lb.curselection()[0])
             for idx, p in enumerate(pfs):
