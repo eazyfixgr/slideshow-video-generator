@@ -1,8 +1,9 @@
 """The Project Text Input window: two texts side-by-side with live previews.
 
-Layout: left column has the photos text (top) and the videos text (bottom),
-right column has their previews, and the AI instructions sit below with their
-own buttons. The window confirms before closing with unsaved changes.
+Layout: left column has the videos text (top) and the photos text (bottom),
+matching the export order (videos first, photos after). The right column has
+their previews, and the AI instructions sit below with their own buttons.
+The window confirms before closing with unsaved changes.
 """
 
 import threading
@@ -38,23 +39,9 @@ class TextInputMixin:
         main.rowconfigure(0, weight=1)
         main.rowconfigure(1, weight=1)
 
-        # -------------------- photos text (top-left) + preview (top-right)
-        pf = ttk.LabelFrame(main, text="Κείμενο για ΦΩΤΟΓΡΑΦΙΕΣ")
-        pf.grid(row=0, column=0, sticky='nsew', padx=(0, 8), pady=(0, 6))
-        ph = ttk.Frame(pf)
-        ph.pack(fill='x')
-        ttk.Button(ph, text="Quick Paste", command=lambda: quick_paste(txt_p)).pack(side='left')
-        txt_p = scrolledtext.ScrolledText(pf, height=7, wrap=tk.WORD, undo=True)
-        txt_p.pack(fill='both', expand=True, padx=4, pady=(0, 4))
-
-        pv = ttk.LabelFrame(main, text="Preview ΦΩΤΟΓΡΑΦΙΑΣ")
-        pv.grid(row=0, column=1, sticky='nsew', pady=(0, 6))
-        canvas_p = tk.Canvas(pv, bg='black', highlightthickness=1, highlightbackground='#888')
-        canvas_p.pack(padx=6, pady=6)
-
-        # -------------------- videos text (bottom-left) + preview (bottom-right)
+        # -------------------- videos text (top-left) + preview (top-right)
         vf = ttk.LabelFrame(main, text="Κείμενο για ΒΙΝΤΕΟ")
-        vf.grid(row=1, column=0, sticky='nsew', padx=(0, 8))
+        vf.grid(row=0, column=0, sticky='nsew', padx=(0, 8), pady=(0, 6))
         vh = ttk.Frame(vf)
         vh.pack(fill='x')
         ttk.Button(vh, text="Quick Paste", command=lambda: quick_paste(txt_v)).pack(side='left')
@@ -62,9 +49,23 @@ class TextInputMixin:
         txt_v.pack(fill='both', expand=True, padx=4, pady=(0, 4))
 
         vv = ttk.LabelFrame(main, text="Preview ΒΙΝΤΕΟ")
-        vv.grid(row=1, column=1, sticky='nsew')
+        vv.grid(row=0, column=1, sticky='nsew', pady=(0, 6))
         canvas_v = tk.Canvas(vv, bg='black', highlightthickness=1, highlightbackground='#888')
         canvas_v.pack(padx=6, pady=6)
+
+        # -------------------- photos text (bottom-left) + preview (bottom-right)
+        pf = ttk.LabelFrame(main, text="Κείμενο για ΦΩΤΟΓΡΑΦΙΕΣ")
+        pf.grid(row=1, column=0, sticky='nsew', padx=(0, 8))
+        ph = ttk.Frame(pf)
+        ph.pack(fill='x')
+        ttk.Button(ph, text="Quick Paste", command=lambda: quick_paste(txt_p)).pack(side='left')
+        txt_p = scrolledtext.ScrolledText(pf, height=7, wrap=tk.WORD, undo=True)
+        txt_p.pack(fill='both', expand=True, padx=4, pady=(0, 4))
+
+        pv = ttk.LabelFrame(main, text="Preview ΦΩΤΟΓΡΑΦΙΑΣ")
+        pv.grid(row=1, column=1, sticky='nsew')
+        canvas_p = tk.Canvas(pv, bg='black', highlightthickness=1, highlightbackground='#888')
+        canvas_p.pack(padx=6, pady=6)
 
         ttk.Label(main, foreground="#555",
                   text="Αν αφήσεις κενό το ένα κείμενο, αυτό του άλλου εμφανίζεται και στα δύο."

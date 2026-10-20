@@ -56,10 +56,6 @@ class PreviewMixin:
                 self._post_ui(messagebox.showinfo, "Preview", "Δεν υπάρχουν media για preview.")
                 return
 
-            if photo_item is not None:
-                self._render_preview(photo_item[1], "image", w, h, self.preview_photo_canvas, photo_item[2])
-            else:
-                self._post_ui(self._clear_preview, self.preview_photo_canvas)
             if video_item is not None:
                 # For a trimmed video the export starts at trim_start, so preview that frame.
                 t_start = float(video_item[2].get("trim_start") or 0.0)
@@ -67,6 +63,10 @@ class PreviewMixin:
                                      video_item[2], t_start)
             else:
                 self._post_ui(self._clear_preview, self.preview_video_canvas)
+            if photo_item is not None:
+                self._render_preview(photo_item[1], "image", w, h, self.preview_photo_canvas, photo_item[2])
+            else:
+                self._post_ui(self._clear_preview, self.preview_photo_canvas)
         except Exception as e:
             # Bind the text now: the `except ... as e` name is cleared when the
             # block ends, so a lambda captured over `e` would fail later.

@@ -109,8 +109,9 @@ class LayoutMixin:
         ttk.Label(right, text="Preview (πρώτο καρέ)", font=("Calibri", 12, "bold")).pack(pady=(8, 0))
         prev_frame = ttk.Frame(right)
         prev_frame.pack(fill='both', expand=True, padx=6, pady=5)
-        self.preview_photo_canvas = self._build_preview_canvas(prev_frame, "ΦΩΤΟΓΡΑΦΙΑ")
+        # Video first, photos after - the same order the export uses.
         self.preview_video_canvas = self._build_preview_canvas(prev_frame, "ΒΙΝΤΕΟ")
+        self.preview_photo_canvas = self._build_preview_canvas(prev_frame, "ΦΩΤΟΓΡΑΦΙΑ")
         ttk.Label(right, text="Κλικ σε preview = μεγέθυνση σε πραγματικό μέγεθος",
                   foreground="#666", font=("Calibri", 8)).pack(pady=(0, 5))
 
