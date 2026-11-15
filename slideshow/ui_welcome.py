@@ -69,21 +69,18 @@ class WelcomeMixin:
         header.columnconfigure(0, weight=1)
         ttk.Label(header, text="Slideshow Video Creator Pro",
                   font=("Calibri", 21, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(header, text="Πρόσφατα projects",
+        ttk.Label(header, text="Τα 30 πιο πρόσφατα projects",
                   font=("Calibri", 11), foreground=muted_fg).grid(
             row=1, column=0, sticky="w", pady=(2, 0))
         search_var = tk.StringVar()
-        ttk.Label(header, text="Αναζήτηση πρόσφατων:", foreground=muted_fg).grid(
+        ttk.Label(header, text="Αναζήτηση όλων των projects:", foreground=muted_fg).grid(
             row=0, column=1, sticky="e", padx=(12, 0))
         search = ttk.Entry(header, textvariable=search_var, width=32)
         search.grid(row=1, column=1, sticky="e", padx=(12, 0))
-        ttk.Button(header, text="Όλα τα projects…",
-                   command=lambda: open_project_browser()).grid(
-            row=2, column=1, sticky="e", padx=(12, 0), pady=(5, 0))
 
         records = []
         for project_path in sorted(self.projects_dir.glob("*.json"),
-                                   key=lambda path: path.stat().st_mtime, reverse=True)[:18]:
+                                   key=lambda path: path.stat().st_mtime, reverse=True):
             try:
                 with open(project_path, "r", encoding="utf-8-sig") as stream:
                     data = json.load(stream)
@@ -105,6 +102,7 @@ class WelcomeMixin:
                 "media_path": preferred[1],
                 "media_type": preferred[0],
             })
+        recent_records = records[:30]
 
         content = ttk.Frame(body)
         content.grid(row=1, column=0, sticky="nsew")
@@ -124,10 +122,13 @@ class WelcomeMixin:
         status = ttk.Label(body, text="", foreground=muted_fg)
         status.grid(row=2, column=0, sticky="w", pady=(5, 0))
 
-        selected = {"path": records[0]["path"] if records else None}
+        selected = {"path": recent_records[0]["path"] if recent_records else None}
         card_widgets = {}
         thumbnail_cache = {}
         thumbnail_refs = {}
+        thumbnail_labels = {}
+        thumbnail_pending = set()
+        thumbnail_failed = set()
         welcome_state = {"closed": False}
 
         def choose(record):
@@ -145,6 +146,64 @@ class WelcomeMixin:
                 return
             self.load_project(project_path=project_path, on_loaded=close)
 
+        def load_project_thumbnail(record):
+            if record["media_type"] == "video":
+                image = self._video_first_frame(record["media_path"])
+            else:
+                image = Image.open(record["media_path"])
+                image.load()
+            image = image.convert("RGB")
+            target_w, target_h = 320, 180
+            scale = max(target_w / image.width, target_h / image.height)
+            image = image.resize((round(image.width * scale), round(image.height * scale)),
+                                 Image.Resampling.LANCZOS)
+            left = max(0, (image.width - target_w) // 2)
+            top = max(0, (image.height - target_h) // 2)
+            return image.crop((left, top, left + target_w, top + target_h))
+
+        def set_thumbnail(project_path, image):
+            thumbnail_pending.discard(project_path)
+            if welcome_state["closed"]:
+                return
+            if image is None:
+                thumbnail_failed.add(project_path)
+                return
+            photo = ImageTk.PhotoImage(image)
+            thumbnail_cache[project_path] = photo
+            thumbnail_refs[project_path] = photo
+            label = thumbnail_labels.get(project_path)
+            if label is not None:
+                try:
+                    if label.winfo_exists():
+                        label.configure(image=photo, text="", width=0, height=0)
+                        label.image_ref = photo
+                except tk.TclError:
+                    pass
+
+        def request_thumbnails(project_list):
+            todo = []
+            for record in project_list:
+                project_path = record["path"]
+                if (record["media_path"] and project_path not in thumbnail_cache and
+                        project_path not in thumbnail_pending and
+                        project_path not in thumbnail_failed):
+                    thumbnail_pending.add(project_path)
+                    todo.append(record)
+            if not todo:
+                return
+
+            def worker():
+                for record in todo:
+                    if welcome_state["closed"]:
+                        return
+                    try:
+                        image = load_project_thumbnail(record)
+                    except Exception:
+                        image = None
+                    self._post_ui(set_thumbnail, record["path"], image)
+
+            threading.Thread(target=worker, daemon=True).start()
+
         def make_card(record, index, columns):
             row, column = divmod(index, columns)
             frame = tk.Frame(cards_frame, bg=card_bg, highlightthickness=1,
@@ -153,15 +212,19 @@ class WelcomeMixin:
             frame.grid(row=row, column=column, sticky="nsew", padx=8, pady=8)
             cards_frame.columnconfigure(column, weight=1, uniform="recent-projects")
             image = thumbnail_cache.get(record["path"])
-            thumb = tk.Label(frame, text="▣" if not image else "", image=image,
-                             bg=card_bg, fg=muted_fg, width=300, height=9,
-                             font=("Segoe UI", 25))
+            if image is not None:
+                thumb = tk.Label(frame, image=image, bg=card_bg)
+                thumb.image_ref = image
+            else:
+                thumb = tk.Label(frame, text="▣", bg=card_bg, fg=muted_fg,
+                                 width=40, height=9, font=("Segoe UI", 25))
             thumb.pack(fill="both", padx=6, pady=(6, 2))
             title = tk.Label(frame, text=record["name"], bg=card_bg, fg=text_fg,
                              anchor="w", justify="left", wraplength=310,
                              font=("Segoe UI", 10, "bold"))
             title.pack(fill="x", padx=8, pady=(3, 8))
             card_widgets[record["path"]] = frame
+            thumbnail_labels[record["path"]] = thumb
             for widget in (frame, thumb, title):
                 widget.bind("<Button-1>", lambda _e, item=record: choose(item))
                 widget.bind("<Double-Button-1>", open_selected)
@@ -172,62 +235,42 @@ class WelcomeMixin:
             for widget in cards_frame.winfo_children():
                 widget.destroy()
             card_widgets.clear()
+            thumbnail_labels.clear()
             query = search_var.get().strip().casefold()
-            visible = [record for record in records
-                       if query in record["name"].casefold()]
+            visible = ([record for record in records
+                        if query in record["name"].casefold() or
+                        query in record["path"].stem.casefold()][:90]
+                       if query else recent_records)
             width = max(1, cards_canvas.winfo_width())
             columns = max(1, min(4, width // 340))
             for index, record in enumerate(visible):
                 make_card(record, index, columns)
             if selected.get("path") not in {record["path"] for record in visible}:
-                selected["path"] = None
+                selected["path"] = visible[0]["path"] if visible else None
+            request_thumbnails(visible[:30])
             if not records:
                 status.config(text="Δεν υπάρχουν αποθηκευμένα projects ακόμη.")
             elif not visible:
-                status.config(text="Δεν βρέθηκαν πρόσφατα projects με αυτό το όνομα.")
+                status.config(text="Δεν βρέθηκαν projects με αυτό το όνομα.")
             else:
                 selected_record = next((record for record in visible
                                         if record["path"] == selected.get("path")), None)
                 status.config(text=(f"Επιλεγμένο: {selected_record['name']}" if selected_record
-                                   else "Διάλεξε project ή πάτησε Open Project για πλήρη αναζήτηση."))
+                                   else f"Βρέθηκαν {len(visible)} project(s). Διάλεξε ένα για άνοιγμα."))
 
-        search_var.trace_add("write", refresh_cards)
+        search_state = {"job": None}
+
+        def schedule_search(*_):
+            if search_state["job"]:
+                try:
+                    dialog.after_cancel(search_state["job"])
+                except tk.TclError:
+                    pass
+            search_state["job"] = dialog.after(180, refresh_cards)
+
+        search_var.trace_add("write", schedule_search)
         cards_canvas.bind("<Configure>", refresh_cards, add="+")
         refresh_cards()
-
-        def set_thumbnail(project_path, image):
-            if welcome_state["closed"]:
-                return
-            if image is not None:
-                thumbnail_cache[project_path] = ImageTk.PhotoImage(image)
-                refresh_cards()
-
-        def load_thumbnails():
-            for record in records:
-                if welcome_state["closed"]:
-                    return
-                if not record["media_path"]:
-                    continue
-                try:
-                    if record["media_type"] == "video":
-                        image = self._video_first_frame(record["media_path"])
-                    else:
-                        image = Image.open(record["media_path"])
-                        image.load()
-                    image = image.convert("RGB")
-                    target_w, target_h = 320, 180
-                    scale = max(target_w / image.width, target_h / image.height)
-                    image = image.resize((round(image.width * scale), round(image.height * scale)),
-                                         Image.Resampling.LANCZOS)
-                    left = max(0, (image.width - target_w) // 2)
-                    top = max(0, (image.height - target_h) // 2)
-                    image = image.crop((left, top, left + target_w, top + target_h))
-                    self._post_ui(set_thumbnail, record["path"], image)
-                except Exception:
-                    continue
-
-        if records:
-            threading.Thread(target=load_thumbnails, daemon=True).start()
 
         def close():
             welcome_state["closed"] = True

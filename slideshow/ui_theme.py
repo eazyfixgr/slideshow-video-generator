@@ -105,8 +105,16 @@ class ThemeMixin:
         style.configure("TSeparator", background=p["border"])
 
     def _theme_mapped(self, event):
+        widget = event.widget
+        if isinstance(widget, str):
+            try:
+                widget = self.root.nametowidget(widget)
+            except (KeyError, tk.TclError):
+                return
+        if not hasattr(widget, "cget"):
+            return
         theme = self.settings.get("ui_theme", "modern")
-        self._theme_widget(event.widget, _MODERN if theme == "modern" else None)
+        self._theme_widget(widget, _MODERN if theme == "modern" else None)
 
     def _theme_widget_tree(self, widget, palette):
         self._theme_widget(widget, palette)
@@ -119,6 +127,8 @@ class ThemeMixin:
 
     @staticmethod
     def _theme_widget(widget, palette):
+        if not hasattr(widget, "cget"):
+            return
         options = ("background", "foreground", "insertbackground", "selectbackground",
                    "selectforeground", "highlightbackground")
         saved = getattr(widget, "_slideshow_original_theme", None)

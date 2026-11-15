@@ -104,7 +104,7 @@ def main():
             root.destroy()
             return
 
-        remaining = max(0, int((2.0 - (time.monotonic() - splash_started)) * 1000))
+        remaining = max(0, int((2.0 - (time.monotonic() - splash_started)) * 1000) + 1)
 
         def finish_startup():
             progress.stop()
