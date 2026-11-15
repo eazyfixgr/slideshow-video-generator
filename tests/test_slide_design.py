@@ -10,6 +10,7 @@ from slideshow.slide_design import (
     legacy_text,
     normalize_presentation,
     presentation_fields,
+    render_design_layers,
 )
 from slideshow.media_edit import MediaEditMixin
 from slideshow.export import ExportMixin
@@ -148,6 +149,23 @@ class TemplateRendererTests(unittest.TestCase):
         frame, overflow = compose_design_frame(source, 360, 640, presentation, fields)
         self.assertEqual(frame.size, (360, 640))
         self.assertTrue(overflow)
+
+    def test_lower_third_panel_fits_short_text_and_moves_top_or_bottom(self):
+        fields = {"title": "Short title"}
+        template = {"template": "lower_third", "mode": "custom"}
+        _, bottom_overlay, _, _ = render_design_layers(
+            360, 640, normalize_presentation(template), fields)
+        bottom_box = bottom_overlay.getchannel("A").getbbox()
+        self.assertIsNotNone(bottom_box)
+        self.assertLess(bottom_box[2] - bottom_box[0], 300)
+        self.assertLess(bottom_box[3] - bottom_box[1], 210)
+
+        template["text_position"] = "top"
+        _, top_overlay, _, _ = render_design_layers(
+            360, 640, normalize_presentation(template), fields)
+        top_box = top_overlay.getchannel("A").getbbox()
+        self.assertIsNotNone(top_box)
+        self.assertLess(top_box[1], 80)
 
 
 if __name__ == "__main__":

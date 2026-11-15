@@ -328,6 +328,7 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
     x, y, rw, rh = rect
     margin = max(18, int(min(w, h) * 0.055))
     text_box = None
+    logo_area = None
 
     if template == "navy_gold":
         yline = rh
@@ -358,14 +359,38 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
             draw.line((0, gy, w, gy), fill=(0, 0, 0, a))
         text_box = (margin, int(h * 0.62), w - margin * 2, int(h * 0.34))
     elif template == "lower_third":
-        alpha = 205 if p["panel_style"] == "solid" else 145
-        box_h = int(h * 0.31)
-        box_y = h - box_h - max(12, int(h * 0.025))
-        draw.rounded_rectangle((margin // 2, box_y, w - margin // 2, h - margin // 2),
-                               radius=max(8, margin // 3), fill=(12, 19, 29, alpha),
-                               outline=_color_rgba(accent, 220), width=max(1, int(h * 0.002)))
-        text_box = (margin, box_y + margin // 2, w - margin * 2,
-                    box_h - margin)
+        visible_text_keys = ("title", "subtitle", "description", "category", "location",
+                             "price", "details", "cta", "business_name", "phone", "website")
+        if any(str(fields.get(key, "")).strip() for key in visible_text_keys):
+            content_width = max(1, w - margin * 2)
+            content_limit = max(1, int(h * 0.70))
+            probe = ImageDraw.Draw(Image.new("RGBA", (w, h)))
+            _overflow, content_h, content_w = _draw_content(
+                probe, (0, 0, content_width, content_limit), fields, p,
+                accent, white, margin, measure_only=True)
+            pad = max(14, int(min(w, h) * 0.026))
+            has_logo = bool(p.get("logo_enabled") and p.get("logo_path") and
+                            os.path.isfile(p["logo_path"]))
+            logo_reserve = max(24, int(min(w, h) * 0.075)) if has_logo else 0
+            panel_h = min(h - margin * 2,
+                          max(2 * pad + logo_reserve + 1, content_h + 2 * pad + logo_reserve))
+            panel_w = min(w - margin * 2,
+                          max(int(w * 0.22), int(content_w + 2 * pad)))
+            panel_x = (w - panel_w) // 2
+            position = p.get("text_position", "template")
+            if position == "top":
+                panel_y = margin
+            elif position == "center":
+                panel_y = max(margin, (h - panel_h) // 2)
+            else:
+                panel_y = h - panel_h - margin
+            alpha = 205 if p["panel_style"] == "solid" else 145
+            draw.rounded_rectangle((panel_x, panel_y, panel_x + panel_w, panel_y + panel_h),
+                                   radius=max(8, margin // 3), fill=(12, 19, 29, alpha),
+                                   outline=_color_rgba(accent, 220), width=max(1, int(h * 0.002)))
+            text_box = (panel_x + pad, panel_y + pad,
+                        max(1, panel_w - 2 * pad), max(1, content_h))
+            logo_area = (panel_x, panel_y, panel_w, panel_h)
     elif template == "intro_outro":
         draw.rectangle((0, 0, w, max(2, int(h * 0.018))), fill=accent)
         draw.rectangle((0, h - max(2, int(h * 0.018)), w, h), fill=accent)
@@ -414,9 +439,9 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
     else:
         return base, overlay, rect, False
 
-    logo_bounds = text_box
+    logo_bounds = logo_area or text_box
     if (text_box and p.get("logo_enabled") and p.get("logo_path") and
-            os.path.isfile(p["logo_path"])):
+            os.path.isfile(p["logo_path"]) and template != "lower_third"):
         tx, ty, tw, th = text_box
         text_box = (tx, ty, tw, max(0, th - int(th * 0.15)))
 
@@ -428,7 +453,7 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
     return base, overlay, rect, overflow
 
 
-def _draw_content(draw, box, fields, p, accent, white, margin):
+def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=False):
     x, y, bw, bh = box
     box_y = y
     if bw < 1 or bh < 1:
@@ -501,6 +526,10 @@ def _draw_content(draw, box, fields, p, accent, white, margin):
         scale *= .86
     overflow = bool(parts and cursor > y + bh)
     content_height = max(0, cursor - y)
+    max_line_width = max((int(_text_width(font, line)) for _name, lines, font, _color, _line_h in parts
+                          for line in lines), default=0)
+    if measure_only:
+        return overflow, content_height, max_line_width
     position = p.get("text_position", "template")
     if position == "center":
         y = box_y + max(0, (bh - content_height) // 2)
