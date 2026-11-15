@@ -35,6 +35,8 @@ class SettingsMixin:
         file_menu.add_command(label="Load Project", command=self.load_project)
         file_menu.add_command(label="Save Project", command=self.save_project)
         file_menu.add_command(label="Project Text...", command=self.open_text_window)
+        file_menu.add_command(label="Storyboard / Slide Content...",
+                              command=self.open_storyboard_editor)
         
         settings_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Settings", menu=settings_menu)

@@ -9,7 +9,8 @@ from tkinter import ttk, messagebox, filedialog, simpledialog, colorchooser
 
 from .deps import Image, ImageTk
 from .slide_design import (DEFAULT_PRESENTATION, TEMPLATES, compose_design_frame,
-                           normalize_presentation, presentation_fields)
+                           has_presentation_settings, normalize_presentation,
+                           presentation_fields)
 
 
 MODE_LABELS = {
@@ -40,6 +41,99 @@ class PresentationMixin:
         self._build_presentation_tab(tab, idx)
         ttk.Button(dialog, text="Κλείσιμο", command=dialog.destroy).pack(
             side="bottom", anchor="e", padx=12, pady=8)
+        return dialog
+
+    def open_storyboard_editor(self):
+        """Open one persistent editor for captions across the full project."""
+        if not self.media_files:
+            messagebox.showinfo("Storyboard", "Πρόσθεσε πρώτα φωτογραφίες ή βίντεο.")
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Storyboard / Slide Content Manager")
+        dialog.geometry("1420x860")
+        dialog.minsize(1050, 680)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        body = ttk.Frame(dialog)
+        body.pack(fill="both", expand=True, padx=10, pady=10)
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        left = ttk.LabelFrame(body, text="Slides στο project")
+        left.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+        list_frame = ttk.Frame(left)
+        list_frame.pack(fill="both", expand=True, padx=6, pady=6)
+        items = tk.Listbox(list_frame, width=34, exportselection=False)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=items.yview)
+        items.configure(yscrollcommand=scrollbar.set)
+        items.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        ttk.Label(left, text="Η εφαρμογή αποθηκεύει τις αλλαγές του τρέχοντος slide "
+                            "όταν επιλέγεις άλλο.", foreground="#666", wraplength=250,
+                  justify="left").pack(fill="x", padx=8, pady=(0, 8))
+
+        right = ttk.Frame(body)
+        right.grid(row=0, column=1, sticky="nsew")
+        active = {"index": None, "panel": None, "holder": None}
+
+        def label_for(index):
+            kind, path, edit = self.media_files[index]
+            icon = "▶" if kind == "video" else "▦"
+            presentation = normalize_presentation(edit.get("presentation"))
+            custom = " ✦" if has_presentation_settings(presentation) else ""
+            return f"{index + 1:02d}. {icon} {Path(path).name}{custom}"
+
+        def refresh_items():
+            items.delete(0, tk.END)
+            for index in range(len(self.media_files)):
+                items.insert(tk.END, label_for(index))
+
+        def select_item(index):
+            if not 0 <= index < len(self.media_files):
+                return
+            if active["index"] == index:
+                return
+            panel = active.get("panel")
+            if panel is not None:
+                apply = getattr(panel, "apply_presentation", None)
+                if apply:
+                    apply()
+                refresh_items()
+            holder = active.get("holder")
+            if holder is not None:
+                holder.destroy()
+            active["index"] = index
+            items.selection_clear(0, tk.END)
+            items.selection_set(index)
+            items.activate(index)
+            items.see(index)
+            panel = ttk.Frame(right)
+            panel.pack(fill="both", expand=True)
+            active["holder"] = panel
+            active["panel"] = self._build_presentation_tab(panel, index)
+            dialog.title(f"Storyboard / Slide Content Manager — {Path(self.media_files[index][1]).name}")
+
+        def on_select(_event=None):
+            choice = items.curselection()
+            if choice:
+                select_item(choice[0])
+
+        def close():
+            panel = active.get("panel")
+            if panel is not None:
+                apply = getattr(panel, "apply_presentation", None)
+                if apply:
+                    apply()
+            dialog.destroy()
+
+        refresh_items()
+        items.bind("<<ListboxSelect>>", on_select)
+        items.bind("<Double-Button-1>", on_select)
+        select_item(0)
+        dialog.protocol("WM_DELETE_WINDOW", close)
+        ttk.Button(dialog, text="Κλείσιμο και εφαρμογή αλλαγών", command=close).pack(
+            side="bottom", anchor="e", padx=12, pady=(0, 10))
         return dialog
 
     def _build_presentation_tab(self, parent, idx):
@@ -334,6 +428,9 @@ class PresentationMixin:
                 transition_duration_var, self.settings.get("transition_duration", .7))
                                                if custom_transition_duration.get() else None)
             values["font_size"] = numeric(font_size_var, 0)
+            if (not original["font_family"] and
+                    values["font_family"] == self.settings.get("font_family", "Calibri")):
+                values["font_family"] = ""
             values["text_color"] = color_vars["text_color"].get()
             values["panel_color"] = color_vars["panel_color"].get()
             values["accent_color"] = color_vars["accent_color"].get()
@@ -536,6 +633,9 @@ class PresentationMixin:
         def apply_current():
             values = current_data()
             target = self.media_files[idx][2]
+            if normalize_presentation(target.get("presentation")) == values:
+                preview_status.config(text="Δεν υπάρχουν αλλαγές στο slide")
+                return
             target["presentation"] = values
             self.is_modified = True
             self.update_media_display()
@@ -546,4 +646,5 @@ class PresentationMixin:
         parent.bind("<Destroy>", lambda e: preview_state.update(closed=True)
                     if e.widget is parent else None, add="+")
         schedule_preview()
+        container.apply_presentation = apply_current
         return container

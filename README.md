@@ -72,6 +72,9 @@
 ### Presentation / Slide Design — v5 Phase 1
 - Κάθε φωτογραφία και βίντεο έχει δικό του tab **Presentation / Slide Design** μέσα στο Edit,
   καθώς και ξεχωριστό άνοιγμα από το μενού δεξιού κλικ.
+- Το **Storyboard / Slide Content** στο toolbar ανοίγει έναν ενιαίο manager: επιλέγεις διαδοχικά
+  τα media από τη λίστα αριστερά και οι αλλαγές του τρέχοντος slide εφαρμόζονται όταν αλλάζεις
+  επιλογή ή κλείνεις το παράθυρο.
 - Τρόποι κειμένου ανά slide: **Use Global Text** (η παλιά συμπεριφορά), **Custom Text**,
   **No Text** και **Custom + Global**. Τα παλιά projects συνεχίζουν να χρησιμοποιούν το κοινό
   κείμενο για φωτογραφίες/βίντεο μέχρι να αλλάξεις εσύ τον τρόπο κάποιου slide.
@@ -178,10 +181,10 @@
   ακριβώς όπως το άφησες.
 
 ### Παράθυρο & συντομεύσεις
-- **Toolbar** στην κορυφή: `↶ Undo`, `↷ Redo`, `Text Input` (τα `Νέο` / `Άνοιγμα` / `Αποθήκευση` είναι στο **File menu**
-  και με `Ctrl+N / Ctrl+O / Ctrl+S`).
+- **Toolbar** στην κορυφή: `↶ Undo`, `↷ Redo`, `Text Input`, `Storyboard / Slide Content`. Τα `Νέο` /
+  `Άνοιγμα` / `Αποθήκευση` είναι στο **File menu** και με `Ctrl+N / Ctrl+O / Ctrl+S`.
 - **File menu**: `New Project`, **`Import Media...`** (προσθήκη φωτό/βίντεο), `Load Project`, `Save Project`,
-  **`Project Text...`**.
+  **`Project Text...`**, **`Storyboard / Slide Content...`**.
 - **Project Name**: πεδίο πάνω-αριστερά, πάνω από τη βιβλιοθήκη media.
 - **Ctrl+N / Ctrl+O / Ctrl+S**: Νέο / Άνοιγμα / Αποθήκευση. **Ctrl+Z / Ctrl+Y**: Undo / Redo.
   **Delete**: διαγραφή επιλεγμένων. **F5**: refresh preview.

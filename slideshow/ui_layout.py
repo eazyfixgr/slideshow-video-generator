@@ -30,6 +30,8 @@ class LayoutMixin:
         ttk.Button(bar, text="↷ Redo", command=self.redo).pack(side='left', padx=2)
         ttk.Separator(bar, orient='vertical').pack(side='left', fill='y', padx=6)
         ttk.Button(bar, text="Text Input", command=self.open_text_window).pack(side='left', padx=2)
+        ttk.Button(bar, text="Storyboard / Slide Content",
+                   command=self.open_storyboard_editor).pack(side='left', padx=2)
 
 
     def setup_gui(self):
