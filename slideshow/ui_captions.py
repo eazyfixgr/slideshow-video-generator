@@ -110,18 +110,25 @@ class CaptionsMixin:
         self._text_captions_dialog = dialog
         dialog.title("Text & Captions")
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        dialog.geometry(f"{min(1280, max(900, int(sw * .88)))}x"
-                        f"{min(820, max(620, int(sh * .88)))}")
-        dialog.minsize(820, 580)
+        dialog.geometry(f"{min(1440, max(1000, int(sw * .94)))}x"
+                        f"{min(920, max(700, int(sh * .92)))}")
+        dialog.minsize(min(900, sw - 80), min(650, sh - 80))
         dialog.resizable(True, True)
         dialog.transient(self.root)
         dialog.grab_set()
 
         outer = ttk.Frame(dialog, padding=10)
         outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
         notebook = ttk.Notebook(outer)
-        notebook.pack(fill="both", expand=True)
+        notebook.grid(row=0, column=0, sticky="nsew")
         dialog._captions_notebook = notebook
+        bottom = ttk.Frame(outer)
+        bottom.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Label(bottom, text="Οι αλλαγές αποθηκεύονται στο project· Ctrl+S γράφει το project στο δίσκο.",
+                  foreground="#666").pack(side="left")
+        ttk.Button(bottom, text="Κλείσιμο", command=lambda: close()).pack(side="right")
 
         video_tab = ttk.Frame(notebook, padding=10)
         photo_tab = ttk.Frame(notebook, padding=10)
@@ -462,7 +469,7 @@ class CaptionsMixin:
             caption_hint.config(text="Κάθε φωτογραφία κρατά το δικό της κείμενο και template.")
             schedule_photo_preview()
 
-        def current_photo_selection():
+        def current_photo_selection(_event=None):
             selected_positions = list(photo_list.curselection())
             if photo_state["mode"] == "individual":
                 if not photos:
@@ -609,11 +616,6 @@ class CaptionsMixin:
                                     parent=dialog)
         design_button.config(command=open_photo_design)
 
-        bottom = ttk.Frame(outer)
-        bottom.pack(fill="x", pady=(8, 0))
-        ttk.Label(bottom, text="Οι αλλαγές αποθηκεύονται στο project· Ctrl+S γράφει το project στο δίσκο.",
-                  foreground="#666").pack(side="left")
-
         def close():
             save_current_individual()
             update_shared_photo_text()
@@ -623,7 +625,6 @@ class CaptionsMixin:
             self._text_captions_dialog = None
             dialog.destroy()
 
-        ttk.Button(bottom, text="Κλείσιμο", command=close).pack(side="right")
         dialog.protocol("WM_DELETE_WINDOW", close)
         dialog.bind("<Escape>", lambda _e: (close(), "break")[1])
         return dialog
