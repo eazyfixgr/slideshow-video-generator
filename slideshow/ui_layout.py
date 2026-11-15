@@ -86,8 +86,6 @@ class LayoutMixin:
 
         controls = ttk.Frame(right)
         controls.pack(side='bottom', fill='x', padx=10, pady=(0, 4))
-        ttk.Button(controls, text="Generate Preview Frame",
-                   command=self.generate_preview).pack(pady=(0, 8))
 
         ttk.Label(controls, text="Output Folder:", font=("Calibri", 10, "bold")).pack(anchor='w')
         r2 = ttk.Frame(controls)
