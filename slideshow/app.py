@@ -37,6 +37,7 @@ from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
 from .ui_presentation import PresentationMixin
 from .slide_design import TEMPLATES
 from .ui_welcome import WelcomeMixin
+from .ui_theme import ThemeMixin
 
 
 # Where settings.json, projects/, music/, temp/ and models/ live.
@@ -58,10 +59,10 @@ PROJECT_TRANSITIONS = {"none", "fade", "fadeblack", "fadewhite", "wipeleft", "wi
                        "wipeup", "wipedown", "smoothleft", "smoothright", "random"}
 
 
-class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, WelcomeMixin, SettingsMixin, LayoutMixin, PreviewMixin, TextInputMixin, AITextMixin):
+class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, WelcomeMixin, ThemeMixin, SettingsMixin, LayoutMixin, PreviewMixin, TextInputMixin, AITextMixin):
     """Composes every mixin above into the one application object."""
 
-    def __init__(self, root):
+    def __init__(self, root, show_welcome=True):
         self.root = root
         self.root.title("Slideshow Video Creator Pro")
         self.root.geometry("1550x950")
@@ -112,10 +113,12 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
 
         self.load_settings()
         self._global_settings = copy.deepcopy(self.settings)
+        self.apply_ui_theme()
         self.view_mode.set(self.settings.get("view_mode", "thumbnails"))
         self.load_music_tracker()
         self.setup_menu()
         self.setup_gui()
+        self.apply_ui_theme()
         self.setup_shortcuts()
         self._restore_window_state()
 
@@ -131,7 +134,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         self._ui_pump_job = self.root.after(25, self._pump_ui_queue)
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.root.after(120, self.show_welcome_screen)
+        if show_welcome:
+            self.root.after(120, self.show_welcome_screen)
 
 
     def _enable_crash_logging(self):
@@ -260,6 +264,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
 
     def load_settings(self):
         default_settings = {
+            "ui_theme": "modern",
             "volume_db": 0, "resolution": "1080x1080", "background_mode": "blur",
             "cropping": False, "font_size": 32, "font_family": "Calibri",
             "text_style": "black_box", "auto_position_photos": False,
@@ -512,11 +517,13 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             pass
 
 
-    def load_project(self, on_loaded=None):
+    def load_project(self, on_loaded=None, project_path=None):
+        if project_path is not None:
+            return self.load_project_file(project_path, on_loaded=on_loaded)
         d = tk.Toplevel(self.root)
         d.title("Load Project")
         d.geometry("400x500")
-        d.transient(self.root)
+        d.transient(getattr(self, "_welcome_dialog", None) or self.root)
         d.grab_set()
         
         # Search field at the top
@@ -573,61 +580,10 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             selected_name = lb.get(lb.curselection()[0])
             for idx, p in enumerate(pfs):
                 if display_name(p) == selected_name:
-                    try:
-                        # utf-8-sig tolerates projects saved with a BOM.
-                        with open(p, 'r', encoding='utf-8-sig') as f:
-                            data = json.load(f)
-                        if not isinstance(data, dict):
-                            raise ValueError("Το αρχείο δεν είναι έγκυρο project.")
-                    except Exception as e:
-                        messagebox.showerror(
-                            "Load Project",
-                            f"Δεν μπόρεσα να φορτώσω το project '{selected_name}':\n{e}")
-                        return
-                    if hasattr(self, "_global_settings"):
-                        for key in PROJECT_SETTING_KEYS:
-                            if key in self._global_settings:
-                                self.settings[key] = copy.deepcopy(self._global_settings[key])
-                    had_project_template = "project_template" in data
-                    project_template = data.get("project_template", "legacy")
-                    self.project_template = (project_template if isinstance(project_template, str)
-                                             and project_template in TEMPLATES else "legacy")
-                    self.project_settings = self._normalize_project_settings(
-                        data.get("project_settings", {}))
-                    self._active_project_settings = bool(self.project_settings)
-                    self.settings.update(self.project_settings)
-                    self.name_var.set(data.get("name", ""))
-                    self.media_files = self.normalize_media_list(
-                        data.get("media_files", data.get("media", [])))
-                    if not had_project_template:
-                        # Projects from the previous release stored "legacy" on
-                        # every item as its default. Interpret that old default as
-                        # inheritance, so setting a project template affects all
-                        # slides while preserving any non-legacy slide overrides.
-                        for item in self.media_files:
-                            if item[2]["presentation"]["template"] == "legacy":
-                                item[2]["presentation"]["template"] = "project"
-                    old_text = data.get("text", "")
-                    self.project_text_videos = data.get("text_videos", old_text)
-                    self.project_text_photos = data.get("text_photos", "")
-                    self.project_ai_instructions = data.get("ai_instructions", "")
-                    self.out_var.set(data.get("out", ""))
-                    self.project_watermark = data.get("project_watermark", {
-                        "enabled": False, "path": "", "position": "bottom_right",
-                        "size_pct": 15, "opacity": 80
-                    })
-                    self.is_modified = False
-                    # Do not carry caches / undo history over from the previous
-                    # project: they would grow memory and Undo could restore it.
-                    self._video_frame_cache.clear()
-                    self._video_dur_cache.clear()
-                    self._undo_stack.clear()
-                    self._redo_stack.clear()
-                    self.selected_indices = set()
-                    self.update_media_display()
-                    d.destroy()
-                    if on_loaded:
-                        on_loaded()
+                    if self.load_project_file(p):
+                        d.destroy()
+                        if on_loaded:
+                            on_loaded()
                     break
         
         def do_duplicate():
@@ -716,6 +672,60 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         lb.bind("<Button-3>", show_context_menu)
         ttk.Button(d, text="Load", command=do_load).pack(pady=5)
         return d
+
+
+    def load_project_file(self, project_path, on_loaded=None):
+        """Load one project directly; used by the welcome screen's recent cards."""
+        path = Path(project_path)
+        try:
+            with open(path, "r", encoding="utf-8-sig") as stream:
+                data = json.load(stream)
+            if not isinstance(data, dict):
+                raise ValueError("Το αρχείο δεν είναι έγκυρο project.")
+        except Exception as exc:
+            messagebox.showerror("Load Project",
+                                 f"Δεν μπόρεσα να φορτώσω το project '{path.stem}':\n{exc}")
+            return False
+
+        if hasattr(self, "_global_settings"):
+            for key in PROJECT_SETTING_KEYS:
+                if key in self._global_settings:
+                    self.settings[key] = copy.deepcopy(self._global_settings[key])
+        had_project_template = "project_template" in data
+        project_template = data.get("project_template", "legacy")
+        self.project_template = (project_template if isinstance(project_template, str)
+                                 and project_template in TEMPLATES else "legacy")
+        self.project_settings = self._normalize_project_settings(
+            data.get("project_settings", {}))
+        self._active_project_settings = bool(self.project_settings)
+        self.settings.update(self.project_settings)
+        self.name_var.set(data.get("name", ""))
+        self.media_files = self.normalize_media_list(
+            data.get("media_files", data.get("media", [])))
+        if not had_project_template:
+            # Previous releases wrote "legacy" for the default appearance.
+            for item in self.media_files:
+                if item[2]["presentation"]["template"] == "legacy":
+                    item[2]["presentation"]["template"] = "project"
+        old_text = data.get("text", "")
+        self.project_text_videos = data.get("text_videos", old_text)
+        self.project_text_photos = data.get("text_photos", "")
+        self.project_ai_instructions = data.get("ai_instructions", "")
+        self.out_var.set(data.get("out", ""))
+        self.project_watermark = data.get("project_watermark", {
+            "enabled": False, "path": "", "position": "bottom_right",
+            "size_pct": 15, "opacity": 80
+        })
+        self.is_modified = False
+        self._video_frame_cache.clear()
+        self._video_dur_cache.clear()
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self.selected_indices = set()
+        self.update_media_display()
+        if on_loaded:
+            on_loaded()
+        return True
 
 
     def on_closing(self):

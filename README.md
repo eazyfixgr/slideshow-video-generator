@@ -177,12 +177,16 @@
   τυχόν σφάλμα με traceback).
 
 ### Projects
-- Στην εκκίνηση εμφανίζεται **Welcome screen** με `Αναζήτηση / Άνοιγμα υπάρχοντος project`,
+- Κατά την εκκίνηση εμφανίζεται **splash screen** φόρτωσης (τουλάχιστον 2 δευτερόλεπτα) και
+  έπειτα μόνο το **Welcome screen**, χωρίς να φαίνεται από πίσω το κύριο παράθυρο.
+- Το Welcome screen έχει `Αναζήτηση / Άνοιγμα υπάρχοντος project`,
   `Νέο project (κλασικό)`, `Νέο project με οδηγό` και `Συνέχεια χωρίς project`.
 - Ο **New Project Wizard** ρωτά όνομα και φάκελο εξόδου, ανάλυση, project default template,
   background/cropping, διάρκεια φωτογραφίας και μετάβαση. Οι ρυθμίσεις αποθηκεύονται στο project.
 - **File > New Project / Save Project / Load Project** (JSON στον φάκελο `projects/`).
 - Ο οδηγός ανοίγει και από `File > New Project Wizard...`.
+- Το `Settings > Appearance / Theme...` αλλάζει μεταξύ **Modern Dark** και **Classic Windows**.
+- Από `Settings > Appearance / Theme` επιλέγεις **Modern Dark** ή **Classic Windows**.
 - Το **Save Project** απαιτεί όνομα: αν λείπει, εμφανίζεται προειδοποίηση και εστιάζει το πεδίο
   «Project Name» (δεν δημιουργείται άδειο `.json`).
 - Στο Load Project: **αναζήτηση** και δεξί κλικ για **Load / Duplicate / Rename / Delete**.

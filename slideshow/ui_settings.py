@@ -51,6 +51,45 @@ class SettingsMixin:
         settings_menu.add_command(label="Watermark / Logo Settings", command=self.show_watermark_settings)
         settings_menu.add_command(label="Project Watermark / Logo (override)",
                                   command=self.show_project_watermark)
+        settings_menu.add_command(label="Appearance / Theme...",
+                                  command=self.show_appearance_settings)
+
+
+    def show_appearance_settings(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Appearance / Theme")
+        dialog.geometry("480x300")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        body = ttk.Frame(dialog, padding=20)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Application appearance", font=("Calibri", 13, "bold")).pack(
+            anchor="w", pady=(0, 8))
+        ttk.Label(body, text="Choose a theme. Your choice is saved for the next launch.",
+                  foreground="#666", wraplength=420).pack(anchor="w", pady=(0, 14))
+
+        choices = {"Modern Dark": "modern", "Classic Windows": "classic"}
+        current_label = next((label for label, value in choices.items()
+                              if value == self.settings.get("ui_theme", "modern")),
+                             "Modern Dark")
+        theme_var = tk.StringVar(value=current_label)
+        ttk.Label(body, text="Theme").pack(anchor="w", pady=(0, 3))
+        ttk.Combobox(body, textvariable=theme_var, values=list(choices),
+                     state="readonly").pack(fill="x")
+
+        buttons = ttk.Frame(body)
+        buttons.pack(side="bottom", fill="x", pady=(18, 0))
+
+        def apply():
+            self.settings["ui_theme"] = choices.get(theme_var.get(), "modern")
+            self.apply_ui_theme()
+            self.save_settings()
+            dialog.destroy()
+
+        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(buttons, text="Apply", command=apply).pack(side="right")
 
 
     def _scrollable(self, dialog, canvas_height=560):
