@@ -34,6 +34,7 @@ from .ui_preview import PreviewMixin
 from .ui_text import TextInputMixin
 from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
 from .ui_presentation import PresentationMixin
+from .slide_design import TEMPLATES
 
 
 # Where settings.json, projects/, music/, temp/ and models/ live.
@@ -72,6 +73,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         self._enable_crash_logging()
 
         self.current_project = None
+        self.project_template = "legacy"
         self.media_files = []
         self.is_modified = False
         self.thumbnails = []
@@ -353,6 +355,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
     def new_project(self):
         self.name_var.set("")
         self.media_files = []
+        self.project_template = "legacy"
         self.project_text_videos = ""
         self.project_text_photos = ""
         self.project_ai_instructions = ""
@@ -400,7 +403,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             "text_photos": self.project_text_photos,
             "ai_instructions": self.project_ai_instructions,
             "out": self.out_var.get(),
-            "project_watermark": self.project_watermark
+            "project_watermark": self.project_watermark,
+            "project_template": self.project_template,
         }
         p = self.projects_dir / f"{safe}.json"
         try:
@@ -495,9 +499,21 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
                             "Load Project",
                             f"Δεν μπόρεσα να φορτώσω το project '{selected_name}':\n{e}")
                         return
+                    had_project_template = "project_template" in data
+                    project_template = data.get("project_template", "legacy")
+                    self.project_template = (project_template if isinstance(project_template, str)
+                                             and project_template in TEMPLATES else "legacy")
                     self.name_var.set(data.get("name", ""))
                     self.media_files = self.normalize_media_list(
                         data.get("media_files", data.get("media", [])))
+                    if not had_project_template:
+                        # Projects from the previous release stored "legacy" on
+                        # every item as its default. Interpret that old default as
+                        # inheritance, so setting a project template affects all
+                        # slides while preserving any non-legacy slide overrides.
+                        for item in self.media_files:
+                            if item[2]["presentation"]["template"] == "legacy":
+                                item[2]["presentation"]["template"] = "project"
                     old_text = data.get("text", "")
                     self.project_text_videos = data.get("text_videos", old_text)
                     self.project_text_photos = data.get("text_photos", "")

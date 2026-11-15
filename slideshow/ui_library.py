@@ -175,7 +175,8 @@ class LibraryMixin:
         for i, (t, p, ed) in enumerate(self.media_files):
             icon = "▶" if t == "video" else "▦"
             mark = "  ✎" if self.has_edit(ed) else ""
-            design = "  ✦" if has_presentation_settings(ed.get("presentation")) else ""
+            design = "  ✦" if has_presentation_settings(
+                ed.get("presentation"), getattr(self, "project_template", "legacy")) else ""
             text = f"{i+1}. {icon} [{t.upper()}] {Path(p).name}{self._media_duration(t, p)}{mark}{design}"
             lbl = tk.Label(self.thumb_frame, text=text, anchor='w', bg='#eee', padx=10, pady=2)
             lbl.pack(fill='x')
@@ -218,7 +219,8 @@ class LibraryMixin:
                     tk.Label(outer, text="✎", font=("Calibri", 9, "bold"),
                              fg="white", bg="#2d6cdf", padx=4).place(
                         relx=1.0, x=-2, rely=1.0, y=-2, anchor='se')
-                if has_presentation_settings(ed.get("presentation")):
+                if has_presentation_settings(
+                        ed.get("presentation"), getattr(self, "project_template", "legacy")):
                     tk.Label(outer, text="✦", font=("Calibri", 10, "bold"),
                              fg="white", bg="#7d3c98", padx=4).place(
                         relx=0.0, x=2, rely=1.0, y=-2, anchor='sw')

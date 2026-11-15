@@ -23,6 +23,8 @@ TEMPLATES = {
     "intro_outro": "Introduction / Outro",
     "before_after": "Before / After",
 }
+INHERIT_TEMPLATE = "project"
+INHERIT_TEMPLATE_LABEL = "Use Project Default"
 
 FONT_FILES = {
     "Calibri": ("calibri.ttf", "calibrib.ttf"),
@@ -34,7 +36,7 @@ FONT_FILES = {
 DEFAULT_PRESENTATION = {
     "scene_id": "",
     "mode": "global",
-    "template": "legacy",
+    "template": INHERIT_TEMPLATE,
     "title": "",
     "subtitle": "",
     "description": "",
@@ -77,15 +79,17 @@ def normalize_presentation(value=None, scene_id=None):
     if isinstance(value, dict):
         data.update(value)
     data["scene_id"] = str(data.get("scene_id") or scene_id or uuid.uuid4().hex)
-    if data.get("mode") not in _MODES:
+    if not isinstance(data.get("mode"), str) or data.get("mode") not in _MODES:
         data["mode"] = "global"
-    if data.get("template") not in TEMPLATES:
-        data["template"] = "legacy"
-    if data.get("text_position") not in _TEXT_POSITIONS:
+    if (not isinstance(data.get("template"), str) or
+            (data.get("template") not in TEMPLATES and
+             data.get("template") != INHERIT_TEMPLATE)):
+        data["template"] = INHERIT_TEMPLATE
+    if not isinstance(data.get("text_position"), str) or data.get("text_position") not in _TEXT_POSITIONS:
         data["text_position"] = "template"
-    if data.get("panel_style") not in _PANEL_STYLES:
+    if not isinstance(data.get("panel_style"), str) or data.get("panel_style") not in _PANEL_STYLES:
         data["panel_style"] = "solid"
-    if data.get("transition") not in _TRANSITIONS:
+    if not isinstance(data.get("transition"), str) or data.get("transition") not in _TRANSITIONS:
         data["transition"] = "global"
     for key in ("title", "subtitle", "description", "category", "location", "price",
                 "details", "cta", "business_name", "phone", "website", "logo_path",
@@ -117,10 +121,12 @@ def normalize_presentation(value=None, scene_id=None):
     return data
 
 
-def has_presentation_settings(value):
+def has_presentation_settings(value, project_template="legacy"):
     """Whether an item should display a presentation badge in the library."""
     data = normalize_presentation(value)
-    return bool(data["mode"] != "global" or data["template"] != "legacy" or
+    return bool(data["mode"] != "global" or
+                data["template"] not in ("legacy", INHERIT_TEMPLATE) or
+                (data["template"] == INHERIT_TEMPLATE and project_template != "legacy") or
                 data["duration"] is not None or data["logo_enabled"] or
                 data["compare_path"] or data["transition"] != "global" or
                 data["transition_duration"] is not None)

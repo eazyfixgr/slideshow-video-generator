@@ -9,6 +9,7 @@ from tkinter import ttk, messagebox, filedialog, simpledialog, colorchooser
 
 from .deps import Image, ImageTk
 from .slide_design import (DEFAULT_PRESENTATION, TEMPLATES, compose_design_frame,
+                           INHERIT_TEMPLATE, INHERIT_TEMPLATE_LABEL,
                            has_presentation_settings, normalize_presentation,
                            presentation_fields)
 
@@ -45,9 +46,6 @@ class PresentationMixin:
 
     def open_storyboard_editor(self):
         """Open one persistent editor for captions across the full project."""
-        if not self.media_files:
-            messagebox.showinfo("Storyboard", "Πρόσθεσε πρώτα φωτογραφίες ή βίντεο.")
-            return
         dialog = tk.Toplevel(self.root)
         dialog.title("Storyboard / Slide Content Manager")
         dialog.geometry("1420x860")
@@ -62,6 +60,15 @@ class PresentationMixin:
 
         left = ttk.LabelFrame(body, text="Slides στο project")
         left.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+        default_row = ttk.Frame(left)
+        default_row.pack(fill="x", padx=6, pady=(6, 2))
+        ttk.Label(default_row, text="Project default template").pack(anchor="w")
+        default_template_var = tk.StringVar(
+            value=TEMPLATES.get(self.project_template, TEMPLATES["legacy"]))
+        default_template_combo = ttk.Combobox(
+            default_row, textvariable=default_template_var, state="readonly",
+            values=list(TEMPLATES.values()), width=31)
+        default_template_combo.pack(fill="x", pady=(2, 0))
         list_frame = ttk.Frame(left)
         list_frame.pack(fill="both", expand=True, padx=6, pady=6)
         items = tk.Listbox(list_frame, width=34, exportselection=False)
@@ -81,13 +88,30 @@ class PresentationMixin:
             kind, path, edit = self.media_files[index]
             icon = "▶" if kind == "video" else "▦"
             presentation = normalize_presentation(edit.get("presentation"))
-            custom = " ✦" if has_presentation_settings(presentation) else ""
+            custom = " ✦" if has_presentation_settings(
+                presentation, self.project_template) else ""
             return f"{index + 1:02d}. {icon} {Path(path).name}{custom}"
 
         def refresh_items():
             items.delete(0, tk.END)
             for index in range(len(self.media_files)):
                 items.insert(tk.END, label_for(index))
+
+        def set_project_template(*_):
+            template = next((key for key, label in TEMPLATES.items()
+                             if label == default_template_var.get()), "legacy")
+            if template == self.project_template:
+                return
+            self.project_template = template
+            self.is_modified = True
+            refresh_items()
+            self.update_media_display()
+            panel = active.get("panel")
+            refresh = getattr(panel, "refresh_presentation_preview", None) if panel else None
+            if refresh:
+                refresh()
+
+        default_template_var.trace_add("write", set_project_template)
 
         def select_item(index):
             if not 0 <= index < len(self.media_files):
@@ -130,7 +154,11 @@ class PresentationMixin:
         refresh_items()
         items.bind("<<ListboxSelect>>", on_select)
         items.bind("<Double-Button-1>", on_select)
-        select_item(0)
+        if self.media_files:
+            select_item(0)
+        else:
+            ttk.Label(right, text="Πρόσθεσε media στο project για να επεξεργαστείς slides.",
+                      foreground="#666").pack(expand=True)
         dialog.protocol("WM_DELETE_WINDOW", close)
         ttk.Button(dialog, text="Κλείσιμο και εφαρμογή αλλαγών", command=close).pack(
             side="bottom", anchor="e", padx=12, pady=(0, 10))
@@ -236,9 +264,12 @@ class PresentationMixin:
         template_row = ttk.Frame(form)
         template_row.pack(fill="x", padx=8, pady=3)
         ttk.Label(template_row, text="Template", width=17).pack(side="left")
-        template_var = tk.StringVar(value=TEMPLATES.get(draft["template"], TEMPLATES["legacy"]))
+        template_label = (INHERIT_TEMPLATE_LABEL if draft["template"] == INHERIT_TEMPLATE
+                          else TEMPLATES.get(draft["template"], TEMPLATES["legacy"]))
+        template_var = tk.StringVar(value=template_label)
         ttk.Combobox(template_row, textvariable=template_var, state="readonly",
-                     values=list(TEMPLATES.values())).pack(side="left", fill="x", expand=True)
+                     values=[INHERIT_TEMPLATE_LABEL, *TEMPLATES.values()]).pack(
+            side="left", fill="x", expand=True)
         template_var.trace_add("write", schedule_preview)
 
         preset_row = ttk.Frame(form)
@@ -388,14 +419,24 @@ class PresentationMixin:
 
         button_row = ttk.Frame(preview)
         button_row.grid(row=3, column=0, sticky="ew", padx=6, pady=6)
-        ttk.Button(button_row, text="↻ Πρότυπα defaults", command=lambda: reset_design()).pack(
-            fill="x", pady=2)
-        ttk.Button(button_row, text="Αποθήκευση preset…", command=lambda: save_preset()).pack(
-            fill="x", pady=2)
-        ttk.Button(button_row, text="Εφαρμογή σχεδίου στα επιλεγμένα",
-                   command=lambda: apply_design_selected()).pack(fill="x", pady=2)
-        ttk.Button(button_row, text="Εφαρμογή στο τρέχον slide",
-                   command=lambda: apply_current()).pack(fill="x", pady=2)
+        button_row.columnconfigure(0, weight=1)
+        button_row.columnconfigure(1, weight=1)
+        ttk.Button(button_row, text="↻ Πρότυπα defaults", command=lambda: reset_design()).grid(
+            row=0, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_row, text="Αποθήκευση preset…", command=lambda: save_preset()).grid(
+            row=0, column=1, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_row, text="Template → επιλεγμένα (Ctrl/Shift)",
+                   command=lambda: apply_template_selected()).grid(
+            row=1, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_row, text="Template → ΟΛΑ",
+                   command=lambda: apply_template_all()).grid(
+            row=1, column=1, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_row, text="Πλήρες σχέδιο → επιλεγμένα",
+                   command=lambda: apply_design_selected()).grid(
+            row=2, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_row, text="Εφαρμογή τρέχοντος slide",
+                   command=lambda: apply_current()).grid(
+            row=2, column=1, sticky="ew", padx=2, pady=2)
 
         def choose_logo():
             path = filedialog.askopenfilename(
@@ -419,8 +460,9 @@ class PresentationMixin:
                     values[key] = var.get()
             for key, widget in text_widgets.items():
                 values[key] = widget.get("1.0", "end-1c")
-            values["template"] = next((k for k, v in TEMPLATES.items()
-                                       if v == template_var.get()), "legacy")
+            values["template"] = (INHERIT_TEMPLATE if template_var.get() == INHERIT_TEMPLATE_LABEL
+                                   else next((k for k, v in TEMPLATES.items()
+                                              if v == template_var.get()), "legacy"))
             values["duration"] = (numeric(duration_var, self.settings.get("slide_duration", 3))
                                    if duration_enabled.get() else None)
             values["transition"] = transition_labels.get(transition_var.get(), "global")
@@ -469,11 +511,12 @@ class PresentationMixin:
             m_type, path, media_edit = self.media_files[idx]
             raw_global = self.get_text_for(m_type)
             width, height = map(int, self.settings["resolution"].split("x"))
+            effective_values = self._effective_presentation(values)
             preview_status.config(text="Δημιουργώ προεπισκόπηση…")
 
             def worker():
                 try:
-                    missing_compare = (values["template"] == "before_after" and
+                    missing_compare = (effective_values["template"] == "before_after" and
                                        not Path(values.get("compare_path", "")).is_file())
                     if m_type == "image":
                         source = Image.open(path)
@@ -482,7 +525,7 @@ class PresentationMixin:
                         source = self._video_frame_at(path, start) if start > .005 else \
                                  self._video_first_frame(path)
                     source = self._apply_image_edit(source, media_edit, path, m_type=m_type)
-                    if values["template"] == "legacy":
+                    if effective_values["template"] == "legacy":
                         text = self._presentation_text(values, m_type, raw_global)
                         if m_type == "image":
                             frame = self._fit_image_logic(source, width, height, "image", text=text)
@@ -499,10 +542,10 @@ class PresentationMixin:
                         overflow = False
                     else:
                         fields = presentation_fields(values, raw_global)
-                        fallback = source if values["template"] != "before_after" else None
+                        fallback = source if effective_values["template"] != "before_after" else None
                         before = self._presentation_before_image(values, fallback=fallback)
                         frame, overflow = compose_design_frame(
-                            source, width, height, values, fields, before_image=before)
+                            source, width, height, effective_values, fields, before_image=before)
                     frame = self._apply_watermark_overlay(frame)
                     self._post_ui(display_preview, frame, overflow, missing_compare, token)
                 except Exception as exc:
@@ -518,7 +561,8 @@ class PresentationMixin:
                 else:
                     value = fresh.get(key, DEFAULT_PRESENTATION.get(key))
                 if key == "template":
-                    template_var.set(TEMPLATES[value])
+                    template_var.set(INHERIT_TEMPLATE_LABEL if value == INHERIT_TEMPLATE
+                                     else TEMPLATES[value])
                 elif key == "text_position":
                     position_var.set(value)
                 elif key == "font_family":
@@ -581,7 +625,8 @@ class PresentationMixin:
                     continue
                 value = copy.deepcopy(preset[key])
                 if key == "template":
-                    template_var.set(TEMPLATES.get(value, TEMPLATES["legacy"]))
+                    template_var.set(INHERIT_TEMPLATE_LABEL if value == INHERIT_TEMPLATE else
+                                     TEMPLATES.get(value, TEMPLATES["legacy"]))
                 elif key == "text_position":
                     position_var.set(value)
                 elif key == "font_family":
@@ -630,6 +675,34 @@ class PresentationMixin:
             self._schedule_preview()
             preview_status.config(text=f"Σχέδιο εφαρμόστηκε σε {len(selected)} επιλεγμένα media")
 
+        def apply_template_to(indices):
+            template = current_data()["template"]
+            changed = 0
+            for selected_idx in sorted(set(indices)):
+                if not 0 <= selected_idx < len(self.media_files):
+                    continue
+                target = self.media_files[selected_idx][2]
+                current = normalize_presentation(target.get("presentation"))
+                if current["template"] == template:
+                    continue
+                current["template"] = template
+                target["presentation"] = normalize_presentation(
+                    current, scene_id=current["scene_id"])
+                changed += 1
+            if changed:
+                self.is_modified = True
+                self.update_media_display()
+                self._schedule_preview()
+            preview_status.config(text=f"Template εφαρμόστηκε σε {changed} slide(s) — το κείμενο διατηρήθηκε")
+
+        def apply_template_selected():
+            selected = set(getattr(self, "selected_indices", set()))
+            selected.add(idx)
+            apply_template_to(selected)
+
+        def apply_template_all():
+            apply_template_to(range(len(self.media_files)))
+
         def apply_current():
             values = current_data()
             target = self.media_files[idx][2]
@@ -647,4 +720,5 @@ class PresentationMixin:
                     if e.widget is parent else None, add="+")
         schedule_preview()
         container.apply_presentation = apply_current
+        container.refresh_presentation_preview = schedule_preview
         return container

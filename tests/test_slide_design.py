@@ -13,6 +13,7 @@ from slideshow.slide_design import (
 )
 from slideshow.media_edit import MediaEditMixin
 from slideshow.export import ExportMixin
+from slideshow.render import RenderMixin
 
 
 class PresentationModelTests(unittest.TestCase):
@@ -20,7 +21,7 @@ class PresentationModelTests(unittest.TestCase):
         old_project_edit = {"crop": None, "brightness": 1.0, "color": 1.0}
         presentation = normalize_presentation(old_project_edit.get("presentation"))
         self.assertEqual(presentation["mode"], "global")
-        self.assertEqual(presentation["template"], "legacy")
+        self.assertEqual(presentation["template"], "project")
         self.assertEqual(legacy_text(presentation, "Πωλείται\nΔιαμέρισμα"),
                          "Πωλείται\nΔιαμέρισμα")
         self.assertTrue(presentation["scene_id"])
@@ -41,7 +42,7 @@ class PresentationModelTests(unittest.TestCase):
             "transition": "bad;ffmpeg-command", "text_color": "red",
         })
         self.assertEqual(presentation["mode"], "global")
-        self.assertEqual(presentation["template"], "legacy")
+        self.assertEqual(presentation["template"], "project")
         self.assertEqual(presentation["duration"], 30.0)
         self.assertEqual(presentation["transition"], "global")
         self.assertEqual(presentation["text_color"], "#FFFFFF")
@@ -78,6 +79,18 @@ class PresentationModelTests(unittest.TestCase):
         offsets = ExportMixin._clip_offsets(
             None, [2.0, 3.0, 4.0], transitions=[("none", 0.0), ("fade", 0.5), ("none", 0.0)])
         self.assertEqual(offsets, [0.0, 1.5, 4.5])
+
+    def test_project_template_is_inherited_unless_slide_overrides_it(self):
+        class ProjectRenderer(RenderMixin):
+            project_template = "navy_gold"
+
+        inherited = ProjectRenderer._presentation_for(
+            object.__new__(ProjectRenderer), {"presentation": normalize_presentation()})
+        explicit = ProjectRenderer._presentation_for(
+            object.__new__(ProjectRenderer), {
+                "presentation": normalize_presentation({"template": "real_estate"})})
+        self.assertEqual(inherited["template"], "navy_gold")
+        self.assertEqual(explicit["template"], "real_estate")
 
 
 class TemplateRendererTests(unittest.TestCase):

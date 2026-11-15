@@ -19,7 +19,7 @@ from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhan
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
 from .slide_design import (compose_design_frame, legacy_text, normalize_presentation,
-                           presentation_fields)
+                           presentation_fields, TEMPLATES)
 
 
 # Regular / bold font files for the families offered in Settings → Text.
@@ -49,7 +49,16 @@ class RenderMixin:
 
 
     def _presentation_for(self, edit):
-        return normalize_presentation((edit or {}).get("presentation"))
+        return self._effective_presentation((edit or {}).get("presentation"))
+
+
+    def _effective_presentation(self, value):
+        presentation = normalize_presentation(value)
+        if presentation["template"] == "project":
+            default = getattr(self, "project_template", "legacy")
+            presentation["template"] = (default if isinstance(default, str) and default in TEMPLATES
+                                         else "legacy")
+        return presentation
 
 
     def _presentation_text(self, presentation, m_type, global_text=None):

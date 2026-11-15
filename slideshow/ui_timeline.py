@@ -622,7 +622,7 @@ class TimelineMixin:
                 new_items = []
                 for s, e in kept:
                     ed = copy.deepcopy(target)
-                    presentation = self._presentation_for(ed)
+                    presentation = self.item_presentation(ed)
                     presentation["scene_id"] = uuid.uuid4().hex
                     ed["presentation"] = presentation
                     ed["segments"] = None
