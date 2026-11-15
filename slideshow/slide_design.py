@@ -161,11 +161,13 @@ def presentation_fields(presentation, global_text=""):
 
 
 def _global_fields(text):
-    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
     return {
-        "title": lines[0] if lines else "",
+        # Shared legacy text is unstructured copy, not a guaranteed title plus
+        # body. Keep it at one body scale so a short final line does not appear
+        # as an oversized heading followed by tiny copy in new templates.
+        "title": "",
         "subtitle": "",
-        "description": "\n".join(lines[1:]),
+        "description": (text or "").strip(),
         "category": "", "location": "", "price": "", "details": "",
         "cta": "", "business_name": "", "phone": "", "website": "",
         "before_label": "ΠΡΙΝ", "after_label": "ΜΕΤΑ",
@@ -326,18 +328,48 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
     draw = ImageDraw.Draw(overlay)
     rect = image_rect(template, w, h)
     x, y, rw, rh = rect
-    margin = max(18, int(min(w, h) * 0.055))
+    # Keep safe areas generous enough for mobile UI overlays without wasting
+    # the large blank bands the original design left around short captions.
+    margin = max(12, int(min(w, h) * 0.0275))
     text_box = None
     logo_area = None
 
     if template == "navy_gold":
-        yline = rh
-        draw.rectangle((0, yline, w, min(h, yline + max(3, int(h * 0.004))),), fill=accent)
-        text_box = (margin, min(h - margin, yline + margin), w - margin * 2,
-                    max(0, h - yline - margin * 2))
+        pad = max(12, int(min(w, h) * .025))
+        logo_reserve = max(24, int(min(w, h) * .075)) if (
+            p.get("logo_enabled") and p.get("logo_path") and os.path.isfile(p["logo_path"])) else 0
+        probe = ImageDraw.Draw(Image.new("RGBA", (w, h)))
+        _overflow, content_h, _content_w = _draw_content(
+            probe, (0, 0, w - margin * 2, int(h * .45)), fields, p,
+            accent, white, margin, measure_only=True)
+        panel_h = min(int(h * .48), max(int(h * .12), content_h + 2 * pad + logo_reserve))
+        panel_y = 0 if p["text_position"] == "top" else h - panel_h
+        image_y = panel_h if panel_y == 0 else 0
+        rect = (0, image_y, w, h - panel_h)
+        divider_y = panel_h if panel_y == 0 else panel_y
+        draw.rectangle((0, divider_y, w, min(h, divider_y + max(3, int(h * 0.004))),),
+                       fill=accent)
+        text_box = (margin, panel_y + pad, w - margin * 2,
+                    max(0, panel_h - 2 * pad - logo_reserve))
+        logo_area = (0, panel_y, w, panel_h)
     elif template == "real_estate":
-        draw.rectangle((0, rh, w, min(h, rh + max(4, int(h * 0.005))),), fill=accent)
-        text_box = (margin, rh + margin, w - margin * 2, max(0, h - rh - margin * 2))
+        pad = max(12, int(min(w, h) * .025))
+        logo_reserve = max(24, int(min(w, h) * .075)) if (
+            p.get("logo_enabled") and p.get("logo_path") and os.path.isfile(p["logo_path"])) else 0
+        probe = ImageDraw.Draw(Image.new("RGBA", (w, h)))
+        _overflow, content_h, _content_w = _draw_content(
+            probe, (0, 0, w - margin * 2, int(h * .45)), fields, p,
+            accent, white, margin, measure_only=True)
+        panel_h = min(int(h * .48), max(int(h * .12), content_h + 2 * pad + logo_reserve))
+        panel_y = 0 if p["text_position"] == "top" else h - panel_h
+        image_y = panel_h if panel_y == 0 else 0
+        rect = (0, image_y, w, h - panel_h)
+        divider_y = panel_h if panel_y == 0 else panel_y
+        draw.rectangle((0, divider_y, w, min(h, divider_y + max(4, int(h * 0.005))),),
+                       fill=accent)
+        text_box = (margin, panel_y + pad, w - margin * 2,
+                    max(0, panel_h - 2 * pad - logo_reserve))
+        logo_area = (0, panel_y, w, panel_h)
     elif template == "split_editorial":
         if w / h >= 1.25:
             draw.rectangle((rw, 0, min(w, rw + max(3, int(w * 0.004))), h), fill=accent)

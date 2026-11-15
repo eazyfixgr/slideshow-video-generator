@@ -38,6 +38,11 @@ class PresentationModelTests(unittest.TestCase):
         self.assertEqual(fields["description"], "Κοντά στο μετρό")
         self.assertEqual(legacy_text(custom, "Κοινό κείμενο"), "Διαμέρισμα\nΚοντά στο μετρό")
 
+    def test_global_multiline_copy_uses_one_body_scale(self):
+        fields = presentation_fields(normalize_presentation(), "Μεγάλη πρώτη γραμμή\nΜικρότερη τελευταία γραμμή")
+        self.assertEqual(fields["title"], "")
+        self.assertEqual(fields["description"], "Μεγάλη πρώτη γραμμή\nΜικρότερη τελευταία γραμμή")
+
     def test_invalid_values_are_safely_normalized(self):
         presentation = normalize_presentation({
             "mode": "unexpected", "template": "missing", "duration": "999",
