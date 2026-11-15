@@ -20,6 +20,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhance,
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
+from .slide_design import render_design_layers
 
 
 class ExportMixin:
@@ -33,6 +34,14 @@ class ExportMixin:
                 "Παρακαλώ γράψε ένα όνομα για το project πριν κάνεις Generate Video!"
             )
             return
+        for index, (_m_type, _path, edit) in enumerate(self.media_files):
+            presentation = self._presentation_for(edit)
+            if presentation["template"] == "before_after" and not Path(
+                    presentation.get("compare_path", "")).is_file():
+                messagebox.showwarning(
+                    "Before / After",
+                    f"Διάλεξε υπαρκτή φωτογραφία «ΠΡΙΝ» για το slide {index + 1} πριν το export.")
+                return
         out_folder = self.out_var.get().strip()
         if not out_folder:
             if not self._ensure_output_folder():
@@ -114,6 +123,7 @@ class ExportMixin:
 
             clip_files = []
             clip_durations = []
+            clip_transition_specs = []
             total_duration = 0
             audio_specs = []   # videos whose own sound must be kept (with trim + position)
 
@@ -128,22 +138,39 @@ class ExportMixin:
                 if m_type == "image":
                     img = Image.open(path)
                     img = self._apply_image_edit(img, edit, path, m_type="image")
-                    img = self._fit_image_logic(img, width, height, m_type)
-                    fit_move_data = getattr(img, 'fit_move_data', None)
-                    if fit_move_data is None:
+                    presentation = self._presentation_for(edit)
+                    text = self._presentation_text(presentation, "image")
+                    item_duration = presentation["duration"] or image_duration
+                    if presentation["template"] != "legacy":
+                        img, overflow = self._render_design_frame(
+                            img, edit, "image", width, height)
+                        if overflow:
+                            self._log_export(f"item {i}: design text exceeds the template safe area")
                         png_path = temp_dir / f"frame_{i:04d}.png"
-                        img = self.render_text_on_image(img, self.get_text_for("image"), width, height)
                         img.save(str(png_path), "PNG")
-
-                        cmd = ['ffmpeg', '-y', '-loop', '1', '-i', str(png_path), '-t', str(image_duration),
-                               '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-r', '30',
+                        cmd = ['ffmpeg', '-y', '-loop', '1', '-i', str(png_path),
+                               '-t', str(item_duration), '-c:v', 'libx264',
+                               '-preset', 'fast', '-crf', '18', '-r', '30',
                                '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
-                        self._run_ffmpeg_or_raise(cmd, f"encoding image clip {i}")
-                        clip_dur = float(image_duration)
+                        self._run_ffmpeg_or_raise(cmd, f"encoding designed image clip {i}")
+                        clip_dur = float(item_duration)
                     else:
-                        clip_dur = self._render_fit_and_move_clip(
-                            img, fit_move_data, temp_dir, i, width, height, image_duration, clip_path
-                        )
+                        img = self._fit_image_logic(img, width, height, m_type, text=text)
+                        fit_move_data = getattr(img, 'fit_move_data', None)
+                        if fit_move_data is None:
+                            png_path = temp_dir / f"frame_{i:04d}.png"
+                            img = self.render_text_on_image(img, text, width, height)
+                            img.save(str(png_path), "PNG")
+                            cmd = ['ffmpeg', '-y', '-loop', '1', '-i', str(png_path),
+                                   '-t', str(item_duration), '-c:v', 'libx264',
+                                   '-preset', 'fast', '-crf', '18', '-r', '30',
+                                   '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
+                            self._run_ffmpeg_or_raise(cmd, f"encoding image clip {i}")
+                            clip_dur = float(item_duration)
+                        else:
+                            clip_dur = self._render_fit_and_move_clip(
+                                img, fit_move_data, temp_dir, i, width, height,
+                                item_duration, clip_path)
                 else:
                     # Duration via ffprobe. MoviePy's VideoFileClip reads a full
                     # frame just to open the clip and can fail on files ffmpeg
@@ -160,43 +187,90 @@ class ExportMixin:
                     # multi-cut timeline) are trimmed and joined here instead.
                     segs = self.video_keep_segments(edit, full_dur)
                     dur = sum(d for _, d in segs)
+                    presentation = self._presentation_for(edit)
+                    if presentation["duration"] is not None and presentation["duration"] < dur:
+                        # An explicit per-slide duration is an instruction to stop
+                        # playback early; preserve each kept range's order and trim
+                        # only the tail of the selected video segments.
+                        remaining = presentation["duration"]
+                        limited = []
+                        for start, length in segs:
+                            if remaining <= 0.05:
+                                break
+                            kept = min(length, remaining)
+                            limited.append((start, kept))
+                            remaining -= kept
+                        if limited:
+                            segs = limited
+                            dur = sum(length for _, length in segs)
                     first_start = segs[0][0]
                     trim_prefix = self.video_trim_filter(segs)
                     self._log_export(f"item {i} video trim: {len(segs)} segment(s) "
                                      f"{[(round(s, 2), round(d, 2)) for s, d in segs]}, "
                                      f"total {dur:.2f}s")
 
-                    txt_overlay = Image.new("RGBA", (width, height), (0,0,0,0))
-                    txt_overlay = self.render_text_on_image(txt_overlay, self.get_text_for("video"), width, height)
                     txt_p = temp_dir / f"txt_{i:04d}.png"
-                    txt_overlay.save(str(txt_p), "PNG")
-
                     bg_p = temp_dir / f"bg_{i:04d}.png"
                     first_f = self._apply_image_edit(self._video_first_frame(path), edit, m_type="video")
-                    self._create_blur_bg(first_f, width, height).save(str(bg_p), "PNG")
-
-                    # Rotate, then crop (fractions of the rotated source), then fit.
-                    rotate_part = self.video_rotate_filter(edit)
-                    crop_part = self.video_crop_filter(edit)
-                    color_part = self.video_color_filter(edit)
-
-                    if self.settings["cropping"]:
-                        vf = rotate_part + crop_part + f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
+                    if presentation["template"] != "legacy":
+                        fields = self._presentation_fields(presentation, "video")
+                        fallback = first_f if presentation["template"] != "before_after" else None
+                        before = self._presentation_before_image(presentation, fallback=fallback)
+                        base, txt_overlay, rect, overflow = render_design_layers(
+                            width, height, presentation, fields, before_image=before)
+                        if overflow:
+                            self._log_export(f"item {i}: design text exceeds the template safe area")
+                        base.save(str(bg_p), "PNG")
+                        txt_overlay.save(str(txt_p), "PNG")
+                        x, y, rw, rh = rect
+                        rotate_part = self.video_rotate_filter(edit)
+                        crop_part = self.video_crop_filter(edit)
+                        color_part = self.video_color_filter(edit)
+                        vf = (rotate_part + crop_part + color_part +
+                              f"scale={rw}:{rh}:force_original_aspect_ratio=increase,"
+                              f"crop={rw}:{rh},setsar=1,format=rgba")
+                        in_args = (['-ss', f"{first_start:.3f}", '-i', str(path)] if first_start > 0.005
+                                   else ['-i', str(path)])
+                        cmd = (['ffmpeg', '-y'] + in_args +
+                               ['-loop', '1', '-i', str(bg_p),
+                                '-loop', '1', '-i', str(txt_p),
+                                '-filter_complex',
+                                f'{trim_prefix}{vf}[v];'
+                                f'[1:v][v]overlay={x}:{y}:shortest=1[base];'
+                                f'[base][2:v]overlay=0:0:shortest=1,format=yuv420p',
+                                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                                '-r', '30', '-pix_fmt', 'yuv420p', '-t', str(dur),
+                                '-an', str(clip_path)])
                     else:
-                        vf = rotate_part + crop_part + f"scale={width}:{height}:force_original_aspect_ratio=decrease"
-                    if color_part:
-                        vf += "," + color_part
+                        text = self._presentation_text(presentation, "video")
+                        txt_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+                        txt_overlay = self.render_text_on_image(txt_overlay, text, width, height)
+                        txt_overlay.save(str(txt_p), "PNG")
+                        self._create_blur_bg(first_f, width, height).save(str(bg_p), "PNG")
 
-                    in_args = (['-ss', f"{first_start:.3f}", '-i', str(path)] if first_start > 0.005
-                               else ['-i', str(path)])
-                    cmd = (['ffmpeg', '-y'] + in_args +
-                           ['-loop', '1', '-i', str(bg_p),
-                            '-loop', '1', '-i', str(txt_p),
-                            '-filter_complex',
-                            f'{trim_prefix}{vf},format=yuv420p[v];'
-                            f'[1:v][v]overlay=(W-w)/2:(H-h)/2[base];[base][2:v]overlay=0:0',
-                            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-r', '30', '-pix_fmt', 'yuv420p',
-                            '-t', str(dur), '-an', str(clip_path)])
+                        # Rotate, then crop (fractions of the rotated source), then fit.
+                        rotate_part = self.video_rotate_filter(edit)
+                        crop_part = self.video_crop_filter(edit)
+                        color_part = self.video_color_filter(edit)
+                        if self.settings["cropping"]:
+                            vf = (rotate_part + crop_part +
+                                  f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}")
+                        else:
+                            vf = (rotate_part + crop_part +
+                                  f"scale={width}:{height}:force_original_aspect_ratio=decrease")
+                        if color_part:
+                            vf += "," + color_part
+                        in_args = (['-ss', f"{first_start:.3f}", '-i', str(path)] if first_start > 0.005
+                                   else ['-i', str(path)])
+                        cmd = (['ffmpeg', '-y'] + in_args +
+                               ['-loop', '1', '-i', str(bg_p),
+                                '-loop', '1', '-i', str(txt_p),
+                                '-filter_complex',
+                                f'{trim_prefix}{vf},format=yuv420p[v];'
+                                f'[1:v][v]overlay=(W-w)/2:(H-h)/2[base];[base][2:v]overlay=0:0',
+                                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                                '-r', '30', '-pix_fmt', 'yuv420p', '-t', str(dur),
+                                '-an', str(clip_path)])
                     self._run_ffmpeg_or_raise(cmd, f"encoding video clip {i}")
                     clip_dur = float(dur)
 
@@ -225,6 +299,9 @@ class ExportMixin:
                 if clip_path.exists():
                     clip_files.append(clip_path)
                     clip_durations.append(clip_dur)
+                    clip_transition_specs.append({
+                        "effect": presentation.get("transition", "global"),
+                        "duration": presentation.get("transition_duration")})
                     total_duration += clip_dur
                     # Remember where this clip sits (clip index) and its kept
                     # ranges, so its own sound can be aligned to the merged video.
@@ -239,7 +316,8 @@ class ExportMixin:
             # Merge clips with transitions
             self._post_ui(self.progress_var.set, 60)
             merged = temp_dir / "merged.mp4"
-            self._build_merged_with_transitions(clip_files, clip_durations, temp_dir, merged)
+            self._build_merged_with_transitions(clip_files, clip_durations, temp_dir, merged,
+                                                clip_transition_specs)
             self._log_export(f"merge: {len(clip_files)} clips, total {total_duration:.1f}s, "
                              f"merged={'OK' if merged.exists() else 'FAILED'}")
 
@@ -256,14 +334,12 @@ class ExportMixin:
             try:
                 video_dur = float(probe.stdout.strip())
             except:
-                # Estimate the merged length from the raw sum of clips, minus the
-                # time consumed by xfade transition overlaps. A plain concat
-                # (effect "none" or a single clip) has no overlap at all.
-                if self.settings.get("transition_effect") != "none" and len(clip_files) > 1:
-                    overlaps = (len(clip_files) - 1) * float(self.settings.get("transition_duration", 0.7))
-                    video_dur = max(1.0, float(total_duration) - overlaps)
-                else:
-                    video_dur = max(1.0, float(total_duration))
+                # Estimate using the exact per-pair overlaps selected by the
+                # merge (including per-slide overrides and random choices).
+                transitions = getattr(self, "_last_effective_transitions", [])
+                overlaps = sum(duration for effect, duration in transitions
+                               if effect != "none")
+                video_dur = max(1.0, float(total_duration) - overlaps)
             self._log_export(f"video duration for music: {video_dur:.1f}s "
                              f"(sum of clips={total_duration:.1f}s)")
             voice_path = self._build_video_audio_track(audio_specs, clip_durations,
@@ -344,16 +420,21 @@ class ExportMixin:
         return proc
 
 
-    def _clip_offsets(self, durations, effect, transition_duration):
-        """Start time of each clip in the merged timeline (matches the merge)."""
+    def _clip_offsets(self, durations, effect="fade", transition_duration=0.7,
+                      transitions=None):
+        """Start time for each clip after its incoming transition overlap."""
+        if not durations:
+            return []
+        transitions = transitions or []
         offsets = [0.0]
-        cum = 0.0
+        merged_duration = float(durations[0])
         for i in range(1, len(durations)):
-            cum += durations[i - 1]
-            if effect == "none":
-                offsets.append(cum)
-            else:
-                offsets.append(max(0.0, cum - i * transition_duration))
+            item = transitions[i] if i < len(transitions) else None
+            item_effect, item_duration = item if item else (effect, transition_duration)
+            overlap = (min(float(item_duration), merged_duration, float(durations[i]))
+                       if item_effect != "none" else 0.0)
+            offsets.append(max(0.0, merged_duration - overlap))
+            merged_duration += float(durations[i]) - overlap
         return offsets
 
 
@@ -369,7 +450,8 @@ class ExportMixin:
             return None
         effect = self.settings.get("transition_effect", "fade")
         td = float(self.settings.get("transition_duration", 0.7) or 0.7)
-        offsets = self._clip_offsets(clip_durations, effect, td)
+        transitions = getattr(self, "_last_effective_transitions", None)
+        offsets = self._clip_offsets(clip_durations, effect, td, transitions)
 
         inputs, graph, ends = [], [], []
         for spec in specs:
@@ -613,14 +695,35 @@ class ExportMixin:
         self._log_export(f"music: output written ({Path(out_p).name}), {len(tracks)} track(s) marked used")
 
 
-    def _build_merged_with_transitions(self, clip_files, clip_durations, temp_dir, merged):
-        """Merge clip files using xfade transitions (or simple concat if effect is 'none')."""
-        effect = self.settings.get("transition_effect", "fade")
-        td = self.settings.get("transition_duration", 0.7)
-        XFADE_EFFECTS = ["fade", "fadeblack", "fadewhite", "wipeleft", "wiperight",
-                         "wipeup", "wipedown", "smoothleft", "smoothright"]
+    def _build_merged_with_transitions(self, clip_files, clip_durations, temp_dir, merged,
+                                       transition_specs=None):
+        """Merge normalized clips with global or per-slide incoming transitions."""
+        global_effect = self.settings.get("transition_effect", "fade")
+        global_td = float(self.settings.get("transition_duration", 0.7) or 0.7)
+        xfade_effects = {"fade", "fadeblack", "fadewhite", "wipeleft", "wiperight",
+                         "wipeup", "wipedown", "smoothleft", "smoothright"}
+        transition_specs = transition_specs or []
+        effective = [("none", 0.0)]
+        for i in range(1, len(clip_files)):
+            spec = transition_specs[i] if i < len(transition_specs) else {}
+            requested = spec.get("effect", "global") if isinstance(spec, dict) else "global"
+            duration = spec.get("duration") if isinstance(spec, dict) else None
+            try:
+                duration = float(duration) if duration is not None else global_td
+            except (TypeError, ValueError):
+                duration = global_td
+            duration = max(0.2, min(2.0, duration))
+            effect = global_effect if requested in ("", "global", None) else requested
+            if effect == "random":
+                pool = self.settings.get("random_transitions", [])
+                pool = [item for item in pool if item in xfade_effects] or sorted(xfade_effects)
+                effect = random.choice(pool)
+            if effect not in xfade_effects and effect != "none":
+                effect = "fade"
+            effective.append((effect, duration if effect != "none" else 0.0))
+        self._last_effective_transitions = effective
 
-        if effect == "none" or len(clip_files) <= 1:
+        if all(effect == "none" for effect, _ in effective) or len(clip_files) <= 1:
             concat_file = temp_dir / "list.txt"
             with open(concat_file, 'w', encoding='utf-8') as f:
                 for c in clip_files:
@@ -634,28 +737,45 @@ class ExportMixin:
         for c in clip_files:
             inputs += ['-i', str(c)]
 
-        n = len(clip_files)
+        width, height = map(int, self.settings["resolution"].split("x"))
         filter_parts = []
-        prev_label = "[0:v]"
-        cumulative = 0.0
-        for i in range(1, n):
-            cumulative += clip_durations[i - 1]
-            offset = max(0.0, cumulative - i * td)
-            if effect == "random":
-                random_pool = self.settings.get("random_transitions", [])
-                if not random_pool:
-                    random_pool = XFADE_EFFECTS
-                eff = random.choice(random_pool)
-            else:
-                eff = effect
-            out_label = f"[x{i}]" if i < n - 1 else ""
+        for i in range(len(clip_files)):
             filter_parts.append(
-                f"{prev_label}[{i}:v]xfade=transition={eff}:duration={td}:offset={offset:.3f}{out_label}"
+                f"[{i}:v]fps=30,scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,"
+                f"format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[v{i}]"
             )
-            prev_label = f"[x{i}]"
+        previous = "[v0]"
+        merged_duration = float(clip_durations[0])
+        for i in range(1, len(clip_files)):
+            effect, requested_duration = effective[i]
+            label = f"[mix{i}]"
+            if effect == "none":
+                filter_parts.append(
+                    f"{previous}[v{i}]concat=n=2:v=1:a=0,setsar=1,format=yuv420p{label}"
+                )
+                merged_duration += float(clip_durations[i])
+            else:
+                td = min(requested_duration, merged_duration, float(clip_durations[i]))
+                if td < 0.05:
+                    filter_parts.append(
+                        f"{previous}[v{i}]concat=n=2:v=1:a=0,setsar=1,format=yuv420p{label}"
+                    )
+                    effective[i] = ("none", 0.0)
+                    merged_duration += float(clip_durations[i])
+                else:
+                    offset = max(0.0, merged_duration - td)
+                    filter_parts.append(
+                        f"{previous}[v{i}]xfade=transition={effect}:duration={td:.3f}:"
+                        f"offset={offset:.3f}{label}"
+                    )
+                    effective[i] = (effect, td)
+                    merged_duration += float(clip_durations[i]) - td
+            previous = label
 
+        self._last_effective_transitions = effective
         cmd = (['ffmpeg', '-y'] + inputs +
-               ['-filter_complex', ";".join(filter_parts),
+               ['-filter_complex', ";".join(filter_parts), '-map', previous,
                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
                 '-r', '30', '-pix_fmt', 'yuv420p', '-an', str(merged)])
         self._run_ffmpeg_or_raise(cmd, "merging clips with transitions")

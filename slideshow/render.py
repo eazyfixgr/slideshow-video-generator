@@ -18,6 +18,8 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhance,
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
+from .slide_design import (compose_design_frame, legacy_text, normalize_presentation,
+                           presentation_fields)
 
 
 # Regular / bold font files for the families offered in Settings → Text.
@@ -44,6 +46,52 @@ class RenderMixin:
         if m_type == "image":
             return photos if photos.strip() else videos
         return videos if videos.strip() else photos
+
+
+    def _presentation_for(self, edit):
+        return normalize_presentation((edit or {}).get("presentation"))
+
+
+    def _presentation_text(self, presentation, m_type, global_text=None):
+        if global_text is None:
+            global_text = self.get_text_for(m_type)
+        return legacy_text(presentation, global_text)
+
+
+    def _presentation_fields(self, presentation, m_type, global_text=None):
+        if global_text is None:
+            global_text = self.get_text_for(m_type)
+        return presentation_fields(presentation, global_text)
+
+
+    def _presentation_before_image(self, presentation, fallback=None):
+        """Load the selected Before image for the comparison template, if any."""
+        path = (presentation or {}).get("compare_path")
+        if not path:
+            return fallback
+        try:
+            item = next((it for it in self.media_files
+                         if it[0] == "image" and os.path.normcase(str(it[1])) ==
+                         os.path.normcase(str(path))), None)
+            if item:
+                img = Image.open(item[1])
+                return self._apply_image_edit(img, item[2], item[1], m_type="image")
+            img = Image.open(path)
+            img.load()
+            return img.convert("RGB")
+        except Exception:
+            return fallback
+
+
+    def _render_design_frame(self, source, edit, m_type, width, height, global_text=None):
+        """Render a still frame through the shared slide template engine."""
+        presentation = self._presentation_for(edit)
+        fields = self._presentation_fields(presentation, m_type, global_text)
+        fallback = source if presentation["template"] != "before_after" else None
+        before = self._presentation_before_image(presentation, fallback=fallback)
+        frame, overflow = compose_design_frame(
+            source, width, height, presentation, fields, before_image=before)
+        return frame, overflow
 
 
     def render_text_on_image(self, img, text, w, h):

@@ -290,11 +290,10 @@ class TextInputMixin:
                     else:
                         img = self._video_first_frame(path)
                     img = self._apply_image_edit(img, edit, path, m_type=m_type)
-                    if m_type == "image":
-                        text = text_photos if text_photos.strip() else text_videos
-                    else:
-                        text = text_videos if text_videos.strip() else text_photos
-                    out.append((canvas, self._render_with_text(img, m_type, text, w, h)))
+                    global_text = (text_photos if text_photos.strip() else text_videos) if m_type == "image" else \
+                                  (text_videos if text_videos.strip() else text_photos)
+                    out.append((canvas, self._render_with_text(
+                        img, m_type, global_text, w, h, edit=edit)))
                 except Exception:
                     out.append((canvas, None))
             self._post_ui(lambda: [self._show_dialog_preview(c, f, w, h)
@@ -302,17 +301,23 @@ class TextInputMixin:
         threading.Thread(target=worker, daemon=True).start()
 
 
-    def _render_with_text(self, img, m_type, text, w, h):
+    def _render_with_text(self, img, m_type, text, w, h, edit=None):
         """The export's first frame for one media item, using ``text``."""
+        edit = edit or {}
+        presentation = self._presentation_for(edit)
+        resolved = self._presentation_text(presentation, m_type, text)
+        if presentation["template"] != "legacy":
+            return self._render_design_frame(img, edit, m_type, w, h,
+                                             global_text=text)[0]
         if m_type == "image":
-            frame = self._fit_image_logic(img, w, h, "image", text=text)
+            frame = self._fit_image_logic(img, w, h, "image", text=resolved)
             fit_move_data = getattr(frame, 'fit_move_data', None)
             if fit_move_data is not None:
-                overlay = self._make_text_overlay(text, w, h)
+                overlay = self._make_text_overlay(resolved, w, h)
                 return self._render_fit_and_move_frame(frame, fit_move_data, 0.0, w, h, overlay)
-            return self.render_text_on_image(frame, text, w, h)
+            return self.render_text_on_image(frame, resolved, w, h)
         frame = self._render_video_first_frame(img, w, h)
-        return self.render_text_on_image(frame, text, w, h)
+        return self.render_text_on_image(frame, resolved, w, h)
 
 
     def _show_dialog_preview(self, canvas, frame, w, h):

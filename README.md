@@ -1,4 +1,4 @@
-# Slideshow Video Creator Pro — v4
+# Slideshow Video Creator Pro — v5 (Phase 1)
 
 Εφαρμογή για Windows (Python + Tkinter) που φτιάχνει αυτόματα **slideshow βίντεο MP4** από φωτογραφίες και βίντεο:
 ταιριάζει κάθε εικόνα στο κάδρο, προσθέτει κείμενο, εφέ μετάβασης, watermark και μουσική — για αγγελίες ακινήτων
@@ -18,7 +18,8 @@
   εμφανίζεται **tooltip με το όνομα του αρχείου**.
 - Στη βιβλιοθήκη, κάθε στοιχείο δείχνει τη **θέση** του (πάνω-αριστερά, κίτρινο σήμα),
   στα **βίντεο** ένα **κόκκινο σήμα ▶ VIDEO** (πάνω-δεξιά) ώστε να ξεχωρίζουν αμέσως από τις φωτογραφίες,
-  και ένα **μπλε ✎** (κάτω-δεξιά) όταν το στοιχείο έχει επεξεργαστεί (crop / φωτεινότητα / trim / σβήσιμο).
+  ένα **μπλε ✎** (κάτω-δεξιά) όταν το στοιχείο έχει επεξεργαστεί (crop / φωτεινότητα / trim / σβήσιμο),
+  και **μωβ ✦** όταν έχει ατομική παρουσίαση/σχεδιασμό.
   Οι μικρογραφίες δείχνουν το αποτέλεσμα **μετά** τις επεξεργασίες (και μετά τις καθολικές ρυθμίσεις φωτός).
 - **Επιλογή**: κλικ για ένα στοιχείο, **Ctrl+κλικ** για πολλά, **Shift+κλικ** για εύρος. Τα επιλεγμένα
   τονίζονται με μπλε πλαίσιο.
@@ -67,6 +68,28 @@
 
 - **Παράθυρα Edit**: ανοίγουν **50% μεγαλύτερα** και υποστηρίζουν **πλήρη οθόνη** (checkbox ή **F11**, έξοδος με
   **Escape**). Η επιλογή πλήρους οθόνης **θυμάται** (`edit_fullscreen` στο `settings.json`).
+
+### Presentation / Slide Design — v5 Phase 1
+- Κάθε φωτογραφία και βίντεο έχει δικό του tab **Presentation / Slide Design** μέσα στο Edit,
+  καθώς και ξεχωριστό άνοιγμα από το μενού δεξιού κλικ.
+- Τρόποι κειμένου ανά slide: **Use Global Text** (η παλιά συμπεριφορά), **Custom Text**,
+  **No Text** και **Custom + Global**. Τα παλιά projects συνεχίζουν να χρησιμοποιούν το κοινό
+  κείμενο για φωτογραφίες/βίντεο μέχρι να αλλάξεις εσύ τον τρόπο κάποιου slide.
+- Ξεχωριστά πεδία για τίτλο, υπότιτλο, περιγραφή, κατηγορία/τύπο, τοποθεσία, τιμή,
+  λεπτομέρειες, CTA, επωνυμία, τηλέφωνο και ιστότοπο. Το Before / After template επιτρέπει
+  επιλογή φωτογραφίας «ΠΡΙΝ» και προσαρμογή των ετικετών.
+- Templates: **Elegant Navy & Gold**, **Full-Screen Cinematic**, **Modern Lower Third**,
+  **Split Editorial**, **Real Estate Property**, **Business Service Card**,
+  **Introduction / Outro**, **Before / After**, καθώς και η παλιά εμφάνιση.
+- Ανά slide: θέση κειμένου, γραμματοσειρά/μέγεθος, χρώματα κειμένου/panel/accent,
+  συμπαγές ή ημιδιαφανές panel, προαιρετικό logo, διάρκεια και εισερχόμενη μετάβαση.
+- Ζωντανή προεπισκόπηση, προειδοποίηση όταν το κείμενο υπερβαίνει τον ασφαλή χώρο,
+  **Apply to selected** που διατηρεί τα μοναδικά κείμενα των άλλων slides και αποθήκευση/
+  επαναχρησιμοποίηση design presets.
+- Η διάρκεια εικόνας χρησιμοποιεί την καθολική διάρκεια αν δεν οριστεί ατομική. Για βίντεο,
+  ατομική διάρκεια είναι ρητό ανώτατο όριο αναπαραγωγής και περικόπτει το τέλος του slide.
+- Οι ρυθμίσεις presentation αποθηκεύονται μαζί με τα υπάρχοντα edit metadata και έχουν σταθερό
+  ID ανά scene. Τα αρχικά αρχεία δεν τροποποιούνται.
 
 ### Κείμενο
 - **Δύο ξεχωριστά κείμενα** στο παράθυρο `Text Input`:
@@ -322,8 +345,10 @@ python "slideshow_app v4.py"
 | `slideshow/app.py` | Η βάση: ρυθμίσεις, projects, μουσική, κύκλος ζωής, συντομεύσεις, μνήμη παραθύρου | 507 |
 | `slideshow/media_edit.py` | Δεδομένα επεξεργασίας (crop/φως/χρώμα/trim/erase/audio) + erase cache + ffmpeg filters | 443 |
 | `slideshow/erase.py` | Σβήσιμο αντικειμένων (LaMa / MI-GAN ONNX + OpenCV fallback, offline) | 355 |
-| `slideshow/render.py` | Πώς μια εικόνα/καρέ γίνεται το τελικό κάδρο (fit, blur, κείμενο, pan, watermark) | 334 |
-| `slideshow/export.py` | Όλο το export με ffmpeg: clips, εφέ, watermark, μουσική, cancel | 698 |
+| `slideshow/render.py` | Πώς μια εικόνα/καρέ γίνεται το τελικό κάδρο (fit, blur, κείμενο, pan, watermark) | — |
+| `slideshow/slide_design.py` | Per-slide δεδομένα, templates και κοινός still-frame compositor | — |
+| `slideshow/ui_presentation.py` | Presentation tab, controls, preview, batch design και presets | — |
+| `slideshow/export.py` | Όλο το export με ffmpeg: clips, per-slide transitions, watermark, μουσική, cancel | — |
 | `slideshow/ui_layout.py` | Η διάταξη του κύριου παραθύρου + toolbar | 155 |
 | `slideshow/ui_library.py` | Η βιβλιοθήκη media (επιλογή, drag & drop, badges, tooltips, undo) | 389 |
 | `slideshow/ui_editors.py` | Dispatch των Edit dialogs + fullscreen + crop overlay | 101 |

@@ -12,7 +12,9 @@ The drag zones are deliberately one behaviour each:
   yellow handles    -> drag a cut point
 """
 
+import copy
 import threading
+import uuid
 from pathlib import Path
 
 import tkinter as tk
@@ -117,6 +119,14 @@ class TimelineMixin:
         dlg.title(f"Edit βίντεο — {Path(path).name}")
         self._setup_edit_dialog(dlg, on_fullscreen=lambda full: rescale_main(full))
 
+        notebook = ttk.Notebook(dlg)
+        edit_tab = ttk.Frame(notebook)
+        presentation_tab = ttk.Frame(notebook)
+        notebook.add(edit_tab, text="  ✂  Crop, Trim & Ήχος  ")
+        notebook.add(presentation_tab, text="  ✨  Presentation / Slide Design  ")
+        notebook.pack(fill='both', expand=True, padx=10, pady=(8, 0))
+        self._build_presentation_tab(presentation_tab, idx)
+
         state = {"crop": list(edit["crop"]) if edit.get("crop") else None,
                  "play": existing[0][0] if existing else 0.0, "seg": 0,
                  "drag": None, "job": None, "handle": None,
@@ -126,13 +136,13 @@ class TimelineMixin:
                  "rotate": int(edit.get("rotate", 0) or 0) % 360,
                  "main_max": (MAIN_W, MAIN_H)}
 
-        ttk.Label(dlg, text="Η γραμμή χρόνου δείχνει όλο το βίντεο. Σύρε πάνω στο filmstrip ή στον "
+        ttk.Label(edit_tab, text="Η γραμμή χρόνου δείχνει όλο το βίντεο. Σύρε πάνω στο filmstrip ή στον "
                             "χάρακα για να μετακινήσεις τη γραμμή αναπαραγωγής, πάτα «Χωρισμός εδώ» "
                             "για νέο σημείο κοψίματος, κλικ σε ένα κομμάτι για ΚΡΑΤΑ/ΠΕΤΑ, και σύρε "
                             "τα κίτρινα σημεία για να τα μετακινήσεις. Στο καρέ αριστερά κάνεις crop.",
                   foreground="#555", wraplength=1180, justify='left').pack(padx=12, pady=(10, 2), anchor='w')
 
-        body = ttk.Frame(dlg)
+        body = ttk.Frame(edit_tab)
         body.pack(padx=12, pady=6)
         left = ttk.Frame(body)
         left.pack(side='left', anchor='n')
@@ -156,14 +166,14 @@ class TimelineMixin:
                                     on_finish=lambda: play_finished(),
                                     post_ui=self._post_ui)
 
-        tl = tk.Canvas(dlg, width=TL_W, height=STRIP_H + BAR_H + RULER_H, bg='#1c1c1c',
+        tl = tk.Canvas(edit_tab, width=TL_W, height=STRIP_H + BAR_H + RULER_H, bg='#1c1c1c',
                        highlightthickness=1, highlightbackground='#888', cursor='hand2')
         tl.pack(padx=12, pady=(4, 2))
 
-        info_lbl = ttk.Label(dlg, text="", foreground="#333")
+        info_lbl = ttk.Label(edit_tab, text="", foreground="#333")
         info_lbl.pack(padx=12, anchor='w')
 
-        color_ui = ColorControls(dlg, brightness=edit.get("brightness", 1.0),
+        color_ui = ColorControls(edit_tab, brightness=edit.get("brightness", 1.0),
                                  color=edit.get("color", 1.0),
                                  on_change=lambda: render_main(),
                                  all_label="Ίδιο σε όλα τα βίντεο")
@@ -230,7 +240,7 @@ class TimelineMixin:
         update_audio_btn()
 
         split_var = tk.BooleanVar(value=False)
-        split_cb = ttk.Checkbutton(dlg, variable=split_var,
+        split_cb = ttk.Checkbutton(edit_tab, variable=split_var,
                                    text="Ξεχωριστές σκηνές — κάθε κομμάτι γίνεται δικό του slide στη "
                                         "βιβλιοθήκη, ώστε να το μετακινήσεις ξεχωριστά",
                                    state='disabled')
@@ -611,7 +621,10 @@ class TimelineMixin:
                 m_type, m_path = self.media_files[idx][0], self.media_files[idx][1]
                 new_items = []
                 for s, e in kept:
-                    ed = dict(target)
+                    ed = copy.deepcopy(target)
+                    presentation = self._presentation_for(ed)
+                    presentation["scene_id"] = uuid.uuid4().hex
+                    ed["presentation"] = presentation
                     ed["segments"] = None
                     ed["trim_start"] = 0.0 if s < 0.005 else round(s, 3)
                     ed["trim_end"] = None if e >= duration - 0.005 else round(e, 3)
@@ -622,7 +635,7 @@ class TimelineMixin:
             player.stop()
             dlg.destroy()
 
-        btns = ttk.Frame(dlg)
+        btns = ttk.Frame(edit_tab)
         btns.pack(fill='x', padx=12, pady=(8, 10))
         ttk.Button(btns, text="✂ Χωρισμός εδώ (νέο σημείο)", command=split_here).pack(side='left', padx=3)
         ttk.Button(btns, text="Διαγραφή σημείου", command=delete_point).pack(side='left', padx=3)

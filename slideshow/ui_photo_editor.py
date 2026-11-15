@@ -27,8 +27,11 @@ class PhotoEditorMixin:
         nb.pack(fill='both', expand=True, padx=10, pady=(10, 0))
         tab_crop = ttk.Frame(nb)
         tab_erase = ttk.Frame(nb)
+        tab_presentation = ttk.Frame(nb)
         nb.add(tab_crop, text="  ✂  Crop & Φως  ")
         nb.add(tab_erase, text="  🧽  Σβήσιμο  ")
+        nb.add(tab_presentation, text="  ✨  Presentation / Slide Design  ")
+        self._build_presentation_tab(tab_presentation, idx)
 
         # ============================ tab 1: crop / brightness / colour
         # The crop and the erase strokes are stored against the *rotated* image,

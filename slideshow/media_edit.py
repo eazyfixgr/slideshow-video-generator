@@ -18,6 +18,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhance,
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
+from .slide_design import normalize_presentation
 
 
 class MediaEditMixin:
@@ -25,11 +26,12 @@ class MediaEditMixin:
 
     @staticmethod
     def default_edit(m_type):
+        presentation = normalize_presentation()
         # "rotate" is the clockwise rotation in degrees (0/90/180/270), applied
         # before crop and erase so every stored coordinate is in that orientation.
         if m_type == "image":
             return {"crop": None, "brightness": 1.0, "color": 1.0, "erase": None,
-                    "rotate": 0}
+                    "rotate": 0, "presentation": presentation}
         # "segments" is the multi-cut timeline: a list of [start, end] kept
         # ranges in seconds. None means the classic single trim_start/trim_end
         # range, which is what every project saved before multi-cut has.
@@ -37,7 +39,8 @@ class MediaEditMixin:
         # "audio": None means "follow the global video_audio setting"; True/False
         # is a per-video override (unmute / mute) set from the Edit dialog.
         return {"crop": None, "trim_start": 0.0, "trim_end": None, "segments": None,
-                "brightness": 1.0, "color": 1.0, "audio": None, "rotate": 0}
+                "brightness": 1.0, "color": 1.0, "audio": None, "rotate": 0,
+                "presentation": presentation}
 
 
     @classmethod
@@ -49,11 +52,18 @@ class MediaEditMixin:
         edit = item[2] if len(item) > 2 and isinstance(item[2], dict) else {}
         base = dict(cls.default_edit(m_type))
         base.update(edit)
+        base["presentation"] = normalize_presentation(
+            edit.get("presentation"), scene_id=(base.get("presentation") or {}).get("scene_id"))
         return (m_type, path, base)
-
 
     def _new_item(self, m_type, path):
         return (m_type, path, self.default_edit(m_type))
+
+
+    @staticmethod
+    def item_presentation(edit):
+        """Return validated per-item presentation settings."""
+        return normalize_presentation((edit or {}).get("presentation"))
 
 
     def normalize_media_list(self, items):

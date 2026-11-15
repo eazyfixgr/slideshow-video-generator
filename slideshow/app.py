@@ -33,6 +33,7 @@ from .ui_layout import LayoutMixin
 from .ui_preview import PreviewMixin
 from .ui_text import TextInputMixin
 from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
+from .ui_presentation import PresentationMixin
 
 
 # Where settings.json, projects/, music/, temp/ and models/ live.
@@ -44,7 +45,7 @@ else:
     APP_DIR = Path(__file__).resolve().parent.parent
 
 
-class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, SettingsMixin, LayoutMixin, PreviewMixin, TextInputMixin, AITextMixin):
+class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, SettingsMixin, LayoutMixin, PreviewMixin, TextInputMixin, AITextMixin):
     """Composes every mixin above into the one application object."""
 
     def __init__(self, root):

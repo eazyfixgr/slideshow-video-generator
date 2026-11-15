@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
 from .deps import Image, ImageTk
+from .slide_design import has_presentation_settings
 
 
 class LibraryMixin:
@@ -174,7 +175,8 @@ class LibraryMixin:
         for i, (t, p, ed) in enumerate(self.media_files):
             icon = "▶" if t == "video" else "▦"
             mark = "  ✎" if self.has_edit(ed) else ""
-            text = f"{i+1}. {icon} [{t.upper()}] {Path(p).name}{self._media_duration(t, p)}{mark}"
+            design = "  ✦" if has_presentation_settings(ed.get("presentation")) else ""
+            text = f"{i+1}. {icon} [{t.upper()}] {Path(p).name}{self._media_duration(t, p)}{mark}{design}"
             lbl = tk.Label(self.thumb_frame, text=text, anchor='w', bg='#eee', padx=10, pady=2)
             lbl.pack(fill='x')
             self._item_widgets.append(lbl)
@@ -216,6 +218,10 @@ class LibraryMixin:
                     tk.Label(outer, text="✎", font=("Calibri", 9, "bold"),
                              fg="white", bg="#2d6cdf", padx=4).place(
                         relx=1.0, x=-2, rely=1.0, y=-2, anchor='se')
+                if has_presentation_settings(ed.get("presentation")):
+                    tk.Label(outer, text="✦", font=("Calibri", 10, "bold"),
+                             fg="white", bg="#7d3c98", padx=4).place(
+                        relx=0.0, x=2, rely=1.0, y=-2, anchor='sw')
             except Exception:
                 tk.Label(outer, text="Error").pack()
             self._bind_tree(outer, i)
@@ -343,6 +349,8 @@ class LibraryMixin:
         m_type = self.media_files[idx][0]
         edit_label = "Edit (crop & trim)..." if m_type == "video" else "Edit (crop & brightness)..."
         m.add_command(label=edit_label, command=lambda: self.open_edit_dialog(idx))
+        m.add_command(label="Presentation / Slide Design...",
+                      command=lambda: self.open_presentation_editor(idx))
         m.add_separator()
         m.add_command(label="Delete" if n == 1 else f"Delete ({n} επιλεγμένα)",
                       command=self.delete_selected)

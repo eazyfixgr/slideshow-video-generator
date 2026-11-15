@@ -127,25 +127,33 @@ class PreviewMixin:
         export picks a random pan direction, so this shows the pan start -
         the text layout is identical for every pan position."""
         edit = edit or {}
+        presentation = self._presentation_for(edit)
+        text = self._presentation_text(presentation, m_type)
         if m_type == "image":
             img = Image.open(path)
             img = self._apply_image_edit(img, edit, path, m_type="image")
-            frame = self._fit_image_logic(img, w, h, "image")
-            fit_move_data = getattr(frame, 'fit_move_data', None)
-            if fit_move_data is not None:
-                # Actual first frame of the pan animation (t=0), not the middle.
-                overlay = self._make_text_overlay(self.get_text_for("image"), w, h)
-                frame = self._render_fit_and_move_frame(frame, fit_move_data, 0.0, w, h, overlay)
+            if presentation["template"] != "legacy":
+                frame, _overflow = self._render_design_frame(img, edit, "image", w, h)
             else:
-                frame = self.render_text_on_image(frame, self.get_text_for("image"), w, h)
+                frame = self._fit_image_logic(img, w, h, "image", text=text)
+                fit_move_data = getattr(frame, 'fit_move_data', None)
+                if fit_move_data is not None:
+                    # Actual first frame of the pan animation (t=0), not the middle.
+                    overlay = self._make_text_overlay(text, w, h)
+                    frame = self._render_fit_and_move_frame(frame, fit_move_data, 0.0, w, h, overlay)
+                else:
+                    frame = self.render_text_on_image(frame, text, w, h)
         else:
             if t_start > 0.005:
                 raw = self._video_frame_at(path, t_start)
             else:
                 raw = self._video_first_frame(path)
-            first = self._apply_image_edit(raw, edit, m_type="video")  # apply the video crop
-            frame = self._render_video_first_frame(first, w, h)
-            frame = self.render_text_on_image(frame, self.get_text_for("video"), w, h)
+            first = self._apply_image_edit(raw, edit, m_type="video")
+            if presentation["template"] != "legacy":
+                frame, _overflow = self._render_design_frame(first, edit, "video", w, h)
+            else:
+                frame = self._render_video_first_frame(first, w, h)
+                frame = self.render_text_on_image(frame, text, w, h)
 
         frame = self._apply_watermark_overlay(frame)
         full = frame.copy()
