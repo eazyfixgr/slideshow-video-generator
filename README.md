@@ -177,7 +177,12 @@
   τυχόν σφάλμα με traceback).
 
 ### Projects
+- Στην εκκίνηση εμφανίζεται **Welcome screen** με `Αναζήτηση / Άνοιγμα υπάρχοντος project`,
+  `Νέο project (κλασικό)`, `Νέο project με οδηγό` και `Συνέχεια χωρίς project`.
+- Ο **New Project Wizard** ρωτά όνομα και φάκελο εξόδου, ανάλυση, project default template,
+  background/cropping, διάρκεια φωτογραφίας και μετάβαση. Οι ρυθμίσεις αποθηκεύονται στο project.
 - **File > New Project / Save Project / Load Project** (JSON στον φάκελο `projects/`).
+- Ο οδηγός ανοίγει και από `File > New Project Wizard...`.
 - Το **Save Project** απαιτεί όνομα: αν λείπει, εμφανίζεται προειδοποίηση και εστιάζει το πεδίο
   «Project Name» (δεν δημιουργείται άδειο `.json`).
 - Στο Load Project: **αναζήτηση** και δεξί κλικ για **Load / Duplicate / Rename / Delete**.

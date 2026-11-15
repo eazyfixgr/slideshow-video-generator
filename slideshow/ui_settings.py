@@ -30,6 +30,8 @@ class SettingsMixin:
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="New Project", command=self.new_project)
+        file_menu.add_command(label="New Project Wizard...",
+                              command=self.open_new_project_wizard)
         file_menu.add_command(label="Import Media...", command=self.import_media)
         file_menu.add_separator()
         file_menu.add_command(label="Load Project", command=self.load_project)

@@ -5,6 +5,7 @@ The feature code lives in mixins; this class just composes them, so every
 """
 
 import faulthandler
+import copy
 import json
 import os
 import queue
@@ -35,6 +36,7 @@ from .ui_text import TextInputMixin
 from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
 from .ui_presentation import PresentationMixin
 from .slide_design import TEMPLATES
+from .ui_welcome import WelcomeMixin
 
 
 # Where settings.json, projects/, music/, temp/ and models/ live.
@@ -45,8 +47,18 @@ if getattr(sys, "frozen", False):
 else:
     APP_DIR = Path(__file__).resolve().parent.parent
 
+PROJECT_SETTING_KEYS = (
+    "resolution", "background_mode", "cropping", "slide_duration",
+    "transition_effect", "transition_duration", "random_transitions",
+    "auto_position_photos", "auto_position_videos",
+)
+PROJECT_RESOLUTIONS = {"1080x1080", "1920x1080", "1080x1920", "1080x1350", "720x1280"}
+PROJECT_BACKGROUNDS = {"white", "black", "blur", "fit_and_move"}
+PROJECT_TRANSITIONS = {"none", "fade", "fadeblack", "fadewhite", "wipeleft", "wiperight",
+                       "wipeup", "wipedown", "smoothleft", "smoothright", "random"}
 
-class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, SettingsMixin, LayoutMixin, PreviewMixin, TextInputMixin, AITextMixin):
+
+class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, WelcomeMixin, SettingsMixin, LayoutMixin, PreviewMixin, TextInputMixin, AITextMixin):
     """Composes every mixin above into the one application object."""
 
     def __init__(self, root):
@@ -74,6 +86,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
 
         self.current_project = None
         self.project_template = "legacy"
+        self.project_settings = {}
+        self._active_project_settings = False
         self.media_files = []
         self.is_modified = False
         self.thumbnails = []
@@ -97,6 +111,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         }
 
         self.load_settings()
+        self._global_settings = copy.deepcopy(self.settings)
         self.view_mode.set(self.settings.get("view_mode", "thumbnails"))
         self.load_music_tracker()
         self.setup_menu()
@@ -116,6 +131,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         self._ui_pump_job = self.root.after(25, self._pump_ui_queue)
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.after(120, self.show_welcome_screen)
 
 
     def _enable_crash_logging(self):
@@ -293,8 +309,65 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
 
 
     def save_settings(self):
+        if self._active_project_settings and hasattr(self, "_global_settings"):
+            current_project_settings = self._capture_project_settings()
+            if current_project_settings != self.project_settings:
+                self.is_modified = True
+            self.project_settings = current_project_settings
+            stored = copy.deepcopy(self._global_settings)
+            for key, value in self.settings.items():
+                if key not in PROJECT_SETTING_KEYS:
+                    stored[key] = copy.deepcopy(value)
+            self._global_settings = copy.deepcopy(stored)
+        else:
+            stored = self.settings
+            self._global_settings = copy.deepcopy(self.settings)
         with open(self.settings_file, 'w', encoding='utf-8') as f:
-            json.dump(self.settings, f, indent=2)
+            json.dump(stored, f, indent=2)
+
+
+    def _capture_project_settings(self):
+        return {key: copy.deepcopy(self.settings[key]) for key in PROJECT_SETTING_KEYS
+                if key in self.settings}
+
+
+    @staticmethod
+    def _normalize_project_settings(value):
+        if not isinstance(value, dict):
+            return {}
+        out = {}
+        resolution = value.get("resolution")
+        if isinstance(resolution, str) and resolution in PROJECT_RESOLUTIONS:
+            out["resolution"] = resolution
+        background = value.get("background_mode")
+        if isinstance(background, str) and background in PROJECT_BACKGROUNDS:
+            out["background_mode"] = background
+        if isinstance(value.get("cropping"), bool):
+            out["cropping"] = value["cropping"]
+        if "slide_duration" in value:
+            try:
+                out["slide_duration"] = max(1, min(30, int(value["slide_duration"])))
+            except (TypeError, ValueError):
+                pass
+        transition = value.get("transition_effect")
+        if isinstance(transition, str) and transition in PROJECT_TRANSITIONS:
+            out["transition_effect"] = transition
+        if "transition_duration" in value:
+            try:
+                duration = float(value["transition_duration"])
+                out["transition_duration"] = max(0.2, min(2.0, duration))
+            except (TypeError, ValueError):
+                pass
+        random_transitions = value.get("random_transitions")
+        if isinstance(random_transitions, list):
+            out["random_transitions"] = list(dict.fromkeys(
+                transition for transition in random_transitions
+                if isinstance(transition, str) and transition in PROJECT_TRANSITIONS and
+                transition != "random"))
+        for key in ("auto_position_photos", "auto_position_videos"):
+            if isinstance(value.get(key), bool):
+                out[key] = value[key]
+        return out
 
 
     def load_music_tracker(self):
@@ -353,7 +426,14 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
 
 
     def new_project(self):
+        if hasattr(self, "_global_settings"):
+            for key in PROJECT_SETTING_KEYS:
+                if key in self._global_settings:
+                    self.settings[key] = copy.deepcopy(self._global_settings[key])
+        self._active_project_settings = False
+        self.project_settings = {}
         self.name_var.set("")
+        self.out_var.set(self.settings.get("output_folder", ""))
         self.media_files = []
         self.project_template = "legacy"
         self.project_text_videos = ""
@@ -405,6 +485,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             "out": self.out_var.get(),
             "project_watermark": self.project_watermark,
             "project_template": self.project_template,
+            "project_settings": self._capture_project_settings(),
         }
         p = self.projects_dir / f"{safe}.json"
         try:
@@ -413,6 +494,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         except OSError as e:
             messagebox.showerror("Σφάλμα", f"Δεν μπόρεσα να αποθηκεύσω το project:\n{e}")
             return False
+        self.project_settings = copy.deepcopy(data["project_settings"])
+        self._active_project_settings = bool(self.project_settings)
         self.is_modified = False
         messagebox.showinfo("Saved", "Project saved.")
         return True
@@ -429,10 +512,12 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             pass
 
 
-    def load_project(self):
+    def load_project(self, on_loaded=None):
         d = tk.Toplevel(self.root)
         d.title("Load Project")
         d.geometry("400x500")
+        d.transient(self.root)
+        d.grab_set()
         
         # Search field at the top
         search_frame = ttk.Frame(d)
@@ -499,10 +584,18 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
                             "Load Project",
                             f"Δεν μπόρεσα να φορτώσω το project '{selected_name}':\n{e}")
                         return
+                    if hasattr(self, "_global_settings"):
+                        for key in PROJECT_SETTING_KEYS:
+                            if key in self._global_settings:
+                                self.settings[key] = copy.deepcopy(self._global_settings[key])
                     had_project_template = "project_template" in data
                     project_template = data.get("project_template", "legacy")
                     self.project_template = (project_template if isinstance(project_template, str)
                                              and project_template in TEMPLATES else "legacy")
+                    self.project_settings = self._normalize_project_settings(
+                        data.get("project_settings", {}))
+                    self._active_project_settings = bool(self.project_settings)
+                    self.settings.update(self.project_settings)
                     self.name_var.set(data.get("name", ""))
                     self.media_files = self.normalize_media_list(
                         data.get("media_files", data.get("media", [])))
@@ -533,6 +626,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
                     self.selected_indices = set()
                     self.update_media_display()
                     d.destroy()
+                    if on_loaded:
+                        on_loaded()
                     break
         
         def do_duplicate():
@@ -620,6 +715,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         
         lb.bind("<Button-3>", show_context_menu)
         ttk.Button(d, text="Load", command=do_load).pack(pady=5)
+        return d
 
 
     def on_closing(self):

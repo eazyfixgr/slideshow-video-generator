@@ -14,6 +14,7 @@ from slideshow.slide_design import (
 from slideshow.media_edit import MediaEditMixin
 from slideshow.export import ExportMixin
 from slideshow.render import RenderMixin
+from slideshow.app import SlideshowApp
 
 
 class PresentationModelTests(unittest.TestCase):
@@ -91,6 +92,17 @@ class PresentationModelTests(unittest.TestCase):
                 "presentation": normalize_presentation({"template": "real_estate"})})
         self.assertEqual(inherited["template"], "navy_gold")
         self.assertEqual(explicit["template"], "real_estate")
+
+    def test_legacy_project_settings_are_not_silently_overridden(self):
+        self.assertEqual(SlideshowApp._normalize_project_settings({}), {})
+        normalized = SlideshowApp._normalize_project_settings({
+            "resolution": "invalid", "slide_duration": 999,
+            "transition_effect": "random", "transition_duration": 0.05,
+        })
+        self.assertEqual(normalized["slide_duration"], 30)
+        self.assertEqual(normalized["transition_effect"], "random")
+        self.assertEqual(normalized["transition_duration"], 0.2)
+        self.assertNotIn("resolution", normalized)
 
 
 class TemplateRendererTests(unittest.TestCase):
