@@ -35,6 +35,7 @@ from .ui_preview import PreviewMixin
 from .ui_text import TextInputMixin
 from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
 from .ui_presentation import PresentationMixin
+from .ui_captions import CaptionsMixin
 from .slide_design import TEMPLATES
 from .ui_welcome import WelcomeMixin
 from .ui_theme import ThemeMixin
@@ -59,7 +60,7 @@ PROJECT_TRANSITIONS = {"none", "fade", "fadeblack", "fadewhite", "wipeleft", "wi
                        "wipeup", "wipedown", "smoothleft", "smoothright", "random"}
 
 
-class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, WelcomeMixin, ThemeMixin, SettingsMixin, LayoutMixin, PreviewMixin, TextInputMixin, AITextMixin):
+class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, WelcomeMixin, ThemeMixin, SettingsMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin):
     """Composes every mixin above into the one application object."""
 
     def __init__(self, root, show_welcome=True):
