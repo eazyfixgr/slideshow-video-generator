@@ -182,7 +182,9 @@ class CaptionsMixin:
         video_text = scrolledtext.ScrolledText(video_tab, height=12, wrap=tk.WORD,
                                                undo=True, font=("Calibri", 12))
         video_text.grid(row=1, column=0, sticky="nsew")
-        video_text.insert("1.0", self.project_text_videos)
+        original_video_text = self.project_text_videos.strip()
+        video_text_initial = original_video_text or self.project_text_photos.strip()
+        video_text.insert("1.0", video_text_initial)
         video_text.edit_reset()
         bind_text(video_text, lambda: update_video_text())
 
@@ -209,7 +211,9 @@ class CaptionsMixin:
         bind_text(instructions, lambda: update_video_text())
 
         def update_video_text(_event=None):
-            video_value = video_text.get("1.0", "end-1c").strip()
+            displayed_value = video_text.get("1.0", "end-1c").strip()
+            video_value = (original_video_text if not original_video_text and
+                           displayed_value == video_text_initial else displayed_value)
             instructions_value = instructions.get("1.0", "end-1c").strip()
             if (video_value != self.project_text_videos or
                     instructions_value != self.project_ai_instructions):
@@ -302,6 +306,8 @@ class CaptionsMixin:
         shared_frame.grid(row=0, column=0, sticky="nsew")
         shared_frame.columnconfigure(0, weight=1)
         shared_frame.rowconfigure(1, weight=1)
+        original_photo_text = self.project_text_photos.strip()
+        photo_shared_initial = original_photo_text or self.project_text_videos.strip()
         shared_header = ttk.Frame(shared_frame)
         shared_header.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         shared_header.columnconfigure(0, weight=1)
@@ -313,7 +319,7 @@ class CaptionsMixin:
         shared_text = scrolledtext.ScrolledText(shared_frame, height=10, wrap=tk.WORD,
                                                 undo=True, font=("Calibri", 12))
         shared_text.grid(row=1, column=0, sticky="nsew")
-        shared_text.insert("1.0", self.project_text_photos)
+        shared_text.insert("1.0", photo_shared_initial)
         shared_text.edit_reset()
         bind_text(shared_text, lambda: update_shared_photo_text())
         shared_controls = ttk.Frame(shared_frame)
@@ -440,7 +446,14 @@ class CaptionsMixin:
             presentation = normalize_presentation(edit.get("presentation"))
             caption_title.set(presentation["title"])
             caption_subtitle.set(presentation["subtitle"])
-            replace_text(caption_description, presentation["description"])
+            description = presentation["description"]
+            if presentation["mode"] == "global" and not any((
+                    presentation["title"], presentation["subtitle"], description)):
+                # Show the legacy photo/video fallback that is actually visible
+                # in the preview, without converting it to a per-photo override
+                # unless the user edits this caption.
+                description = self.get_text_for("image")
+            replace_text(caption_description, description)
             photo_state["current"] = index
             photo_state["loading"] = False
             photo_state["dirty"] = False
@@ -505,10 +518,12 @@ class CaptionsMixin:
                                              "και πάτα «Εφαρμογή στα επιλεγμένα».")
             schedule_photo_preview()
 
-        def update_shared_photo_text(_event=None):
+        def update_shared_photo_text(_event=None, force=False):
             value = shared_text.get("1.0", "end-1c").strip()
-            if value != self.project_text_photos:
-                self.project_text_photos = value
+            stored_value = (original_photo_text if not force and
+                            value == photo_shared_initial else value)
+            if stored_value != self.project_text_photos:
+                self.project_text_photos = stored_value
                 self.is_modified = True
                 self._schedule_preview(500)
                 schedule_global_previews()
@@ -525,6 +540,7 @@ class CaptionsMixin:
 
         def apply_shared_to_all():
             value = shared_text.get("1.0", "end-1c").strip()
+            update_shared_photo_text(force=True)
             self.project_text_photos = value
             changed = False
             for index, _path, _edit in photos:
