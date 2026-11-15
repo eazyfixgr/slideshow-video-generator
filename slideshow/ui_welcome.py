@@ -239,7 +239,7 @@ class WelcomeMixin:
             query = search_var.get().strip().casefold()
             visible = ([record for record in records
                         if query in record["name"].casefold() or
-                        query in record["path"].stem.casefold()][:90]
+                        query in record["path"].stem.casefold()]
                        if query else recent_records)
             width = max(1, cards_canvas.winfo_width())
             columns = max(1, min(4, width // 340))
