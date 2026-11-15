@@ -52,6 +52,15 @@ class PreviewMixin:
             w, h = int(res[0]), int(res[1])
             photo_item = next((it for it in self.media_files if it[0] == "image"), None)
             video_item = next((it for it in self.media_files if it[0] == "video"), None)
+            active_scene = getattr(self, "_active_presentation_scene_id", None)
+            if active_scene:
+                active_item = next((it for it in self.media_files
+                                    if isinstance(it[2].get("presentation"), dict) and
+                                    it[2]["presentation"].get("scene_id") == active_scene), None)
+                if active_item and active_item[0] == "image":
+                    photo_item = active_item
+                elif active_item and active_item[0] == "video":
+                    video_item = active_item
             if photo_item is None and video_item is None:
                 self._post_ui(messagebox.showinfo, "Preview", "Δεν υπάρχουν media για preview.")
                 return

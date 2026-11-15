@@ -106,7 +106,8 @@ class LayoutMixin:
         ttk.Progressbar(controls, variable=self.progress_var, maximum=100).pack(fill='x', pady=(4, 0))
 
         # Preview fills the rest of the panel, above the controls.
-        ttk.Label(right, text="Preview (πρώτο καρέ)", font=("Calibri", 12, "bold")).pack(pady=(8, 0))
+        ttk.Label(right, text="Preview (πρώτο καρέ / επιλεγμένο slide)",
+                  font=("Calibri", 12, "bold")).pack(pady=(8, 0))
         prev_frame = ttk.Frame(right)
         prev_frame.pack(fill='both', expand=True, padx=6, pady=5)
         # Video first, photos after - the same order the export uses.

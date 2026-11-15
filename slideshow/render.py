@@ -62,15 +62,20 @@ class RenderMixin:
         if drafts is None:
             drafts = self._presentation_preview_drafts = {}
         drafts[presentation["scene_id"]] = presentation
+        self._active_presentation_scene_id = presentation["scene_id"]
         try:
             self._schedule_preview(250)
         except tk.TclError:
             pass
 
 
-    def _clear_presentation_preview_draft(self, scene_id):
+    def _clear_presentation_preview_draft(self, scene_id, clear_active=False):
         drafts = getattr(self, "_presentation_preview_drafts", None)
-        if drafts and drafts.pop(scene_id, None) is not None:
+        changed = bool(drafts and drafts.pop(scene_id, None) is not None)
+        if clear_active and getattr(self, "_active_presentation_scene_id", None) == scene_id:
+            self._active_presentation_scene_id = None
+            changed = True
+        if changed:
             try:
                 self._schedule_preview(100)
             except tk.TclError:

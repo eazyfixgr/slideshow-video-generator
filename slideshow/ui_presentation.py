@@ -767,7 +767,7 @@ class PresentationMixin:
         def on_parent_destroy(event):
             if event.widget is parent:
                 preview_state["closed"] = True
-                self._clear_presentation_preview_draft(original["scene_id"])
+                self._clear_presentation_preview_draft(original["scene_id"], clear_active=True)
         parent.bind("<Destroy>", on_parent_destroy, add="+")
         schedule_preview()
         container.apply_presentation = apply_current
