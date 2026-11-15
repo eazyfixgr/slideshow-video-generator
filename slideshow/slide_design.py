@@ -252,6 +252,13 @@ def _text_width(font, text):
         return font.getbbox(text)[2]
 
 
+def _line_width(line, font, family):
+    if isinstance(line, str):
+        return _text_width(font, line)
+    bold = _font(family, getattr(font, "size", 12), True)
+    return sum(_text_width(bold if is_bold else font, text) for is_bold, text in line)
+
+
 def _wrap(text, font, max_width):
     lines = []
     for paragraph in (text or "").splitlines() or [""]:
@@ -286,6 +293,48 @@ def _wrap(text, font, max_width):
                 current = word
         if current:
             lines.append(current)
+    return lines
+
+
+def _wrap_rich(text, font, family, max_width):
+    """Word-wrap a description while retaining the app's **bold** markers."""
+    bold_font = _font(family, getattr(font, "size", 12), True)
+    spans = []
+    cursor = 0
+    for match in re.finditer(r"\*\*(.+?)\*\*", text or "", flags=re.DOTALL):
+        if match.start() > cursor:
+            spans.append((False, text[cursor:match.start()]))
+        spans.append((True, match.group(1)))
+        cursor = match.end()
+    if cursor < len(text or ""):
+        spans.append((False, (text or "")[cursor:]))
+    if not spans:
+        spans = [(False, text or "")]
+
+    lines, line, line_width = [], [], 0.0
+
+    def flush(force_empty=False):
+        nonlocal line, line_width
+        if line or force_empty:
+            lines.append(line)
+        line, line_width = [], 0.0
+
+    for is_bold, span in spans:
+        chosen_font = bold_font if is_bold else font
+        paragraphs = span.split("\n")
+        for paragraph_index, paragraph in enumerate(paragraphs):
+            if paragraph_index:
+                flush(force_empty=True)
+            for word in paragraph.split():
+                pieces = _wrap(word, chosen_font, max_width)
+                for piece_index, piece in enumerate(pieces):
+                    token = piece + (" " if piece_index == len(pieces) - 1 else "")
+                    piece_width = _text_width(chosen_font, token)
+                    if line and line_width + piece_width > max_width:
+                        flush()
+                    line.append((is_bold, token))
+                    line_width += piece_width
+    flush()
     return lines
 
 
@@ -519,38 +568,38 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
         if title:
             size = max(9, int(title_size * scale))
             font = _font(family, size, True)
-            lines = _wrap(title, font, bw)
+            lines = _wrap_rich(title, font, family, bw)
             parts.append(("title", lines, font, white, int(size * 1.15)))
             cursor += len(lines) * int(size * 1.15) + max(3, margin // 6)
         if subtitle:
             size = max(9, int(title_size * .52 * scale))
             font = _font(family, size, False)
-            lines = _wrap(subtitle, font, bw)
+            lines = _wrap_rich(subtitle, font, family, bw)
             parts.append(("subtitle", lines, font, white, int(size * 1.22)))
             cursor += len(lines) * int(size * 1.22) + max(3, margin // 7)
         for value in metadata:
             size = max(9, int(title_size * .42 * scale))
             font = _font(family, size, True)
-            lines = _wrap(value, font, bw)
+            lines = _wrap_rich(value, font, family, bw)
             parts.append(("metadata", lines, font, accent if value in (fields.get("location"), fields.get("price")) else white, int(size * 1.2)))
             cursor += len(lines) * int(size * 1.2) + max(2, margin // 8)
         if description:
             size = max(8, int(title_size * .36 * scale))
             font = _font(family, size, False)
-            lines = _wrap(description, font, bw)
+            lines = _wrap_rich(description, font, family, bw)
             parts.append(("description", lines, font, white, int(size * 1.3)))
             cursor += len(lines) * int(size * 1.3) + max(2, margin // 8)
         if cta:
             size = max(9, int(title_size * .37 * scale))
             font = _font(family, size, True)
-            lines = _wrap(cta, font, bw)
+            lines = _wrap_rich(cta, font, family, bw)
             parts.append(("cta", lines, font, accent, int(size * 1.25)))
             cursor += len(lines) * int(size * 1.25) + max(2, margin // 8)
         if business or contact:
             size = max(8, int(title_size * .25 * scale))
             font = _font(family, size, False)
             footer = "  •  ".join(v for v in (business, contact) if v)
-            lines = _wrap(footer, font, bw)
+            lines = _wrap_rich(footer, font, family, bw)
             parts.append(("footer", lines, font, white, int(size * 1.2)))
             cursor += len(lines) * int(size * 1.2)
         if cursor <= y + bh:
@@ -558,7 +607,8 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
         scale *= .86
     overflow = bool(parts and cursor > y + bh)
     content_height = max(0, cursor - y)
-    max_line_width = max((int(_text_width(font, line)) for _name, lines, font, _color, _line_h in parts
+    max_line_width = max((int(_line_width(line, font, family))
+                          for _name, lines, font, _color, _line_h in parts
                           for line in lines), default=0)
     if measure_only:
         return overflow, content_height, max_line_width
@@ -580,7 +630,15 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
             cursor += line_h + max(7, margin // 5)
             continue
         for line in lines:
-            draw.text((x, cursor), line, font=font, fill=color)
+            if isinstance(line, str):
+                draw.text((x, cursor), line, font=font, fill=color)
+            else:
+                text_x = x
+                bold_font = _font(family, getattr(font, "size", 12), True)
+                for is_bold, segment in line:
+                    segment_font = bold_font if is_bold else font
+                    draw.text((text_x, cursor), segment, font=segment_font, fill=color)
+                    text_x += _text_width(segment_font, segment)
             cursor += line_h
         cursor += max(2, margin // 8)
     return overflow

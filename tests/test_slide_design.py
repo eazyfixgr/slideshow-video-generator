@@ -5,6 +5,8 @@ from PIL import Image
 
 from slideshow.slide_design import (
     TEMPLATES,
+    _font,
+    _wrap_rich,
     compose_design_frame,
     image_rect,
     legacy_text,
@@ -81,6 +83,14 @@ class PresentationModelTests(unittest.TestCase):
         fields = presentation_fields(presentation, "Επωνυμία\nΤηλέφωνο")
         self.assertEqual(fields["title"], "Μοναδικός τίτλος")
         self.assertEqual(fields["description"], "Κείμενο slide\nΕπωνυμία\nΤηλέφωνο")
+
+    def test_markdown_bold_wraps_without_leaking_asterisks(self):
+        lines = _wrap_rich("Κανονικό **έντονο κείμενο**\nΤελευταία γραμμή",
+                           _font("Calibri", 18), "Calibri", 260)
+        segments = [segment for line in lines for segment in line]
+        self.assertTrue(any(is_bold for is_bold, _text in segments))
+        self.assertNotIn("**", "".join(text for _is_bold, text in segments))
+        self.assertGreaterEqual(len(lines), 2)
 
     def test_audio_offsets_match_mixed_transition_overlaps(self):
         offsets = ExportMixin._clip_offsets(
