@@ -99,6 +99,14 @@ class PresentationModelTests(unittest.TestCase):
         self.assertEqual(inherited["template"], "navy_gold")
         self.assertEqual(explicit["template"], "real_estate")
 
+        renderer = object.__new__(ProjectRenderer)
+        stored = normalize_presentation({"scene_id": "slide-1", "template": "legacy"})
+        renderer._presentation_preview_drafts = {
+            "slide-1": normalize_presentation({"scene_id": "slide-1", "template": "navy_gold"})
+        }
+        live = ProjectRenderer._presentation_for(renderer, {"presentation": stored})
+        self.assertEqual(live["template"], "navy_gold")
+
     def test_legacy_project_settings_are_not_silently_overridden(self):
         self.assertEqual(SlideshowApp._normalize_project_settings({}), {})
         normalized = SlideshowApp._normalize_project_settings({
@@ -171,6 +179,16 @@ class TemplateRendererTests(unittest.TestCase):
         top_box = top_overlay.getchannel("A").getbbox()
         self.assertIsNotNone(top_box)
         self.assertLess(top_box[1], 80)
+
+    def test_navy_gold_gives_more_photo_area_to_short_copy(self):
+        presentation = normalize_presentation({"template": "navy_gold", "mode": "custom"})
+        short = {"title": "Short title", "description": "One short sentence."}
+        long = {"title": "Property overview", "description": "A detailed property description. " * 70}
+        _base, _overlay, short_rect, _overflow = render_design_layers(
+            720, 1280, presentation, short)
+        _base, _overlay, long_rect, _overflow = render_design_layers(
+            720, 1280, presentation, long)
+        self.assertGreater(short_rect[3], long_rect[3])
 
 
 if __name__ == "__main__":

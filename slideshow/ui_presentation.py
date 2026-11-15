@@ -553,6 +553,7 @@ class PresentationMixin:
             raw_global = self.get_text_for(m_type)
             width, height = map(int, self.settings["resolution"].split("x"))
             effective_values = self._effective_presentation(values)
+            self._set_presentation_preview_draft(values)
             preview_status.config(text="Δημιουργώ προεπισκόπηση…")
 
             def worker():
@@ -752,17 +753,22 @@ class PresentationMixin:
             values = current_data()
             target = self.media_files[idx][2]
             if normalize_presentation(target.get("presentation")) == values:
+                self._clear_presentation_preview_draft(original["scene_id"])
                 preview_status.config(text="Δεν υπάρχουν αλλαγές στο slide")
                 return
             target["presentation"] = values
+            self._clear_presentation_preview_draft(original["scene_id"])
             self.is_modified = True
             self.update_media_display()
             self._schedule_preview()
             preview_status.config(text="Οι ρυθμίσεις του slide αποθηκεύτηκαν στο project")
 
         canvas.bind("<Configure>", schedule_preview, add="+")
-        parent.bind("<Destroy>", lambda e: preview_state.update(closed=True)
-                    if e.widget is parent else None, add="+")
+        def on_parent_destroy(event):
+            if event.widget is parent:
+                preview_state["closed"] = True
+                self._clear_presentation_preview_draft(original["scene_id"])
+        parent.bind("<Destroy>", on_parent_destroy, add="+")
         schedule_preview()
         container.apply_presentation = apply_current
         container.refresh_presentation_preview = schedule_preview

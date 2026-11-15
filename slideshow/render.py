@@ -49,7 +49,32 @@ class RenderMixin:
 
 
     def _presentation_for(self, edit):
-        return self._effective_presentation((edit or {}).get("presentation"))
+        stored = (edit or {}).get("presentation")
+        scene_id = stored.get("scene_id") if isinstance(stored, dict) else None
+        drafts = getattr(self, "_presentation_preview_drafts", {})
+        source = drafts.get(scene_id, stored) if scene_id else stored
+        return self._effective_presentation(source)
+
+
+    def _set_presentation_preview_draft(self, value):
+        presentation = normalize_presentation(value)
+        drafts = getattr(self, "_presentation_preview_drafts", None)
+        if drafts is None:
+            drafts = self._presentation_preview_drafts = {}
+        drafts[presentation["scene_id"]] = presentation
+        try:
+            self._schedule_preview(250)
+        except tk.TclError:
+            pass
+
+
+    def _clear_presentation_preview_draft(self, scene_id):
+        drafts = getattr(self, "_presentation_preview_drafts", None)
+        if drafts and drafts.pop(scene_id, None) is not None:
+            try:
+                self._schedule_preview(100)
+            except tk.TclError:
+                pass
 
 
     def _effective_presentation(self, value):
