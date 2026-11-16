@@ -36,8 +36,7 @@ class SettingsMixin:
         file_menu.add_separator()
         file_menu.add_command(label="Load Project", command=self.load_project)
         file_menu.add_command(label="Save Project", command=self.save_project)
-        file_menu.add_command(label="Video Text...", command=self.open_video_text)
-        file_menu.add_command(label="Photo Captions...", command=self.open_photo_captions)
+        file_menu.add_command(label="Captions...", command=self.open_text_captions_manager)
         file_menu.add_command(label="Slide Design / Project Templates...",
                               command=self.open_storyboard_editor)
         file_menu.add_command(label="Welcome / Recent Projects...",

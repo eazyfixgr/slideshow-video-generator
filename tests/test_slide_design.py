@@ -117,6 +117,22 @@ class PresentationModelTests(unittest.TestCase):
         live = ProjectRenderer._presentation_for(renderer, {"presentation": stored})
         self.assertEqual(live["template"], "navy_gold")
 
+    def test_project_caption_strategy_selects_shared_or_media_type_text(self):
+        class CaptionRenderer(RenderMixin):
+            project_caption_mode = "all"
+            project_text_all = "Shared"
+            project_text_videos = "Video"
+            project_text_photos = "Photo"
+
+        app = object.__new__(CaptionRenderer)
+        self.assertEqual(app.get_text_for("image"), "Shared")
+        self.assertEqual(app.get_text_for("video"), "Shared")
+        app.project_caption_mode = "by_type"
+        self.assertEqual(app.get_text_for("image"), "Photo")
+        self.assertEqual(app.get_text_for("video"), "Video")
+        app.project_text_photos = ""
+        self.assertEqual(app.get_text_for("image"), "")
+
     def test_legacy_project_settings_are_not_silently_overridden(self):
         self.assertEqual(SlideshowApp._normalize_project_settings({}), {})
         normalized = SlideshowApp._normalize_project_settings({

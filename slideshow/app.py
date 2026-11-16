@@ -90,6 +90,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         self.project_template = "legacy"
         self.project_settings = {}
         self._active_project_settings = False
+        self.project_caption_mode = "all"
+        self.project_text_all = ""
         self.media_files = []
         self.is_modified = False
         self.thumbnails = []
@@ -442,6 +444,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         self.out_var.set(self.settings.get("output_folder", ""))
         self.media_files = []
         self.project_template = "legacy"
+        self.project_caption_mode = "all"
+        self.project_text_all = ""
         self.project_text_videos = ""
         self.project_text_photos = ""
         self.project_ai_instructions = ""
@@ -484,14 +488,19 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         data = {
             "name": n,
             "media_files": self.media_files,
-            "text": self.project_text_videos,
-            "text_videos": self.project_text_videos,
-            "text_photos": self.project_text_photos,
+            "text": (self.project_text_all if self.project_caption_mode == "all"
+                     else self.project_text_videos),
+            "text_videos": (self.project_text_all if self.project_caption_mode == "all"
+                            else self.project_text_videos),
+            "text_photos": (self.project_text_all if self.project_caption_mode == "all"
+                            else self.project_text_photos),
             "ai_instructions": self.project_ai_instructions,
             "out": self.out_var.get(),
             "project_watermark": self.project_watermark,
             "project_template": self.project_template,
             "project_settings": self._capture_project_settings(),
+            "caption_mode": self.project_caption_mode,
+            "project_text_all": self.project_text_all,
         }
         p = self.projects_dir / f"{safe}.json"
         try:
@@ -708,10 +717,26 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             for item in self.media_files:
                 if item[2]["presentation"]["template"] == "legacy":
                     item[2]["presentation"]["template"] = "project"
-        old_text = data.get("text", "")
-        self.project_text_videos = data.get("text_videos", old_text)
-        self.project_text_photos = data.get("text_photos", "")
-        self.project_ai_instructions = data.get("ai_instructions", "")
+                    old_text = data.get("text", "")
+                    self.project_text_videos = data.get("text_videos", old_text)
+                    self.project_text_photos = data.get("text_photos", "")
+                    caption_mode = data.get("caption_mode")
+                    if caption_mode in ("all", "by_type"):
+                        self.project_caption_mode = caption_mode
+                        self.project_text_all = str(data.get("project_text_all") or "")
+                        if caption_mode == "all" and not self.project_text_all:
+                            self.project_text_all = (self.project_text_videos or
+                                                     self.project_text_photos or "")
+                    else:
+                        video_text = (self.project_text_videos or "").strip()
+                        photo_text = (self.project_text_photos or "").strip()
+                        if video_text and photo_text and video_text != photo_text:
+                            self.project_caption_mode = "by_type"
+                            self.project_text_all = ""
+                        else:
+                            self.project_caption_mode = "all"
+                            self.project_text_all = self.project_text_videos or photo_text
+                    self.project_ai_instructions = data.get("ai_instructions", "")
         self.out_var.set(data.get("out", ""))
         self.project_watermark = data.get("project_watermark", {
             "enabled": False, "path": "", "position": "bottom_right",

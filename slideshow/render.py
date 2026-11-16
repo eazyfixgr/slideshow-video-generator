@@ -37,15 +37,19 @@ class RenderMixin:
     def get_text_for(self, m_type):
         """Text overlay for a media type.
 
-        Two separate texts exist (videos / photos). If the user filled only one
-        of them, that text is used for BOTH types; if both are filled, each type
-        uses its own.
+        In the project-wide mode every item shares ``project_text_all``. In
+        separate media-type mode an empty text remains empty, while projects
+        imported from older schemas are migrated to preserve their old fallback.
         """
         videos = self.project_text_videos or ""
         photos = self.project_text_photos or ""
         if m_type == "image":
-            return photos if photos.strip() else videos
-        return videos if videos.strip() else photos
+            if getattr(self, "project_caption_mode", "by_type") == "all":
+                return self.project_text_all or ""
+            return photos
+        if getattr(self, "project_caption_mode", "by_type") == "all":
+            return self.project_text_all or ""
+        return videos
 
 
     def _presentation_for(self, edit):

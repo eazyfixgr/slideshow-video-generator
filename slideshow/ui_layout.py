@@ -29,9 +29,8 @@ class LayoutMixin:
         ttk.Button(bar, text="↶ Undo", command=self.undo).pack(side='left', padx=2)
         ttk.Button(bar, text="↷ Redo", command=self.redo).pack(side='left', padx=2)
         ttk.Separator(bar, orient='vertical').pack(side='left', fill='y', padx=6)
-        ttk.Button(bar, text="Video Text", command=self.open_video_text).pack(side='left', padx=2)
-        ttk.Button(bar, text="Photo Captions",
-                   command=self.open_photo_captions).pack(side='left', padx=2)
+        ttk.Button(bar, text="Captions",
+                   command=self.open_text_captions_manager).pack(side='left', padx=2)
 
 
     def setup_gui(self):
