@@ -29,6 +29,15 @@ TRANSITION_LABELS = {
 class WelcomeMixin:
     """Show startup choices and guide new projects without replacing the app UI."""
 
+    def open_recent_projects(self):
+        """Reopen the startup project browser after the user saves the active work."""
+        if self.is_modified:
+            messagebox.showinfo(
+                "Save project first",
+                "Αποθήκευσε πρώτα το τρέχον project (Ctrl+S) και μετά άνοιξε τα πρόσφατα projects.")
+            return
+        return self.show_welcome_screen()
+
     def show_welcome_screen(self):
         if getattr(self, "_welcome_dialog", None) is not None:
             try:
@@ -121,6 +130,9 @@ class WelcomeMixin:
             cards_window, width=e.width))
         status = ttk.Label(body, text="", foreground=muted_fg)
         status.grid(row=2, column=0, sticky="w", pady=(5, 0))
+        ttk.Label(body, text=f"Φάκελος projects: {self.projects_dir}",
+                  foreground=muted_fg, font=("Calibri", 8)).grid(
+            row=3, column=0, sticky="w", pady=(2, 0))
 
         selected = {"path": recent_records[0]["path"] if recent_records else None}
         card_widgets = {}
@@ -312,7 +324,7 @@ class WelcomeMixin:
                 wizard.bind("<Destroy>", restore_welcome_grab, add="+")
 
         footer = ttk.Frame(body)
-        footer.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        footer.grid(row=4, column=0, sticky="ew", pady=(12, 0))
         ttk.Button(footer, text="Open Project", command=open_selected).pack(side="right", padx=4)
         ttk.Button(footer, text="New Project Wizard",
                    command=open_wizard).pack(side="right", padx=4)

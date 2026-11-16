@@ -40,6 +40,8 @@ class SettingsMixin:
         file_menu.add_command(label="Photo Captions...", command=self.open_photo_captions)
         file_menu.add_command(label="Slide Design / Project Templates...",
                               command=self.open_storyboard_editor)
+        file_menu.add_command(label="Welcome / Recent Projects...",
+                              command=self.open_recent_projects)
         
         settings_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Settings", menu=settings_menu)
