@@ -8,7 +8,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 from .deps import Image, ImageTk
-from .slide_design import normalize_presentation
+from .slide_design import (DEFAULT_PRESENTATION, INHERIT_TEMPLATE, TEMPLATES,
+                           normalize_presentation)
 
 
 CAPTION_STRATEGIES = {
@@ -154,9 +155,26 @@ class CaptionsMixin:
         outer = ttk.Frame(dialog, padding=10)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
+
+        style_bar = ttk.LabelFrame(outer, text="Σχεδίαση caption για όλο το project", padding=6)
+        style_bar.grid(row=0, column=0, sticky="ew", pady=(0, 7))
+        style_bar.columnconfigure(1, weight=1)
+        ttk.Label(style_bar, text="Template για video και φωτογραφίες:").grid(
+            row=0, column=0, sticky="w", padx=(0, 8))
+        project_template_var = tk.StringVar(
+            value=TEMPLATES.get(self.project_template, TEMPLATES["legacy"]))
+        project_template_combo = ttk.Combobox(
+            style_bar, textvariable=project_template_var, state="readonly",
+            values=list(TEMPLATES.values()), width=31)
+        project_template_combo.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        style_status = ttk.Label(style_bar, text="", foreground="#2d6cdf")
+        style_status.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        apply_project_template_button = ttk.Button(style_bar, text="Εφαρμογή σε όλα τα media")
+        apply_project_template_button.grid(row=0, column=2, rowspan=2, padx=(0, 2))
+
         strategy_tabs = ttk.Notebook(outer)
-        strategy_tabs.grid(row=0, column=0, sticky="nsew")
+        strategy_tabs.grid(row=1, column=0, sticky="nsew")
         dialog._captions_notebook = strategy_tabs
 
         project_page = ttk.Frame(strategy_tabs, padding=10)
@@ -166,7 +184,7 @@ class CaptionsMixin:
 
         # Shared AI instructions are available to both caption strategies.
         ai_frame = ttk.LabelFrame(outer, text="Οδηγίες για AI (προαιρετικές)", padding=5)
-        ai_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ai_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         ai_frame.columnconfigure(0, weight=1)
         instructions = scrolledtext.ScrolledText(ai_frame, height=2, wrap=tk.WORD,
                                                  undo=True, font=("Calibri", 10))
@@ -176,7 +194,7 @@ class CaptionsMixin:
         self._bind_text_shortcuts(instructions)
 
         bottom = ttk.Frame(outer)
-        bottom.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        bottom.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(bottom, text="Οι αλλαγές αποθηκεύονται στο project· Ctrl+S γράφει το project στο δίσκο.",
                   foreground="#666").pack(side="left")
         close_button = ttk.Button(bottom, text="Κλείσιμο")
@@ -241,6 +259,37 @@ class CaptionsMixin:
         ttk.Button(whole_controls, text="Εφαρμογή caption σε ΟΛΑ τα media",
                    command=lambda: apply_project_caption_to_all()).grid(
             row=0, column=1, sticky="e")
+
+        def apply_project_template_to_all():
+            template = next((key for key, label in TEMPLATES.items()
+                             if label == project_template_var.get()), "legacy")
+            changed = template != self.project_template
+            self.project_template = template
+            style_fields = ("text_position", "font_family", "font_size", "text_color",
+                            "panel_color", "accent_color", "panel_style")
+            for _kind, _path, edit in self.media_files:
+                presentation = normalize_presentation(edit.get("presentation"))
+                if presentation["template"] != INHERIT_TEMPLATE:
+                    presentation["template"] = INHERIT_TEMPLATE
+                    changed = True
+                for field in style_fields:
+                    default_value = DEFAULT_PRESENTATION[field]
+                    if presentation[field] != default_value:
+                        presentation[field] = copy.deepcopy(default_value)
+                        changed = True
+                edit["presentation"] = presentation
+            if changed:
+                self.is_modified = True
+            self.update_media_display()
+            self._schedule_preview()
+            schedule_project_preview()
+            video_state["refresh_preview"]()
+            photo_state["refresh_preview"]()
+            style_status.config(
+                text=f"{TEMPLATES[template]} εφαρμόστηκε σε {len(self.media_files)} media. "
+                     "Τα captions διατηρήθηκαν.")
+
+        apply_project_template_button.config(command=apply_project_template_to_all)
 
         project_preview_job = {"id": None}
 
@@ -798,4 +847,5 @@ class CaptionsMixin:
         return {"frame": page, "save_current": save_current,
                 "reload_shared": lambda: self._replace_caption_text(
                     shared_text, self.get_text_for(media_type)),
+                "refresh_preview": schedule_preview,
                 "closed": lambda: state.update(closed=True)}
