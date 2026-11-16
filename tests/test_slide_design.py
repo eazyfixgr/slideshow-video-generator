@@ -144,6 +144,18 @@ class PresentationModelTests(unittest.TestCase):
         self.assertEqual(normalized["transition_duration"], 0.2)
         self.assertNotIn("resolution", normalized)
 
+    def test_old_caption_text_loads_even_when_new_project_metadata_exists(self):
+        video, photo, mode, shared = SlideshowApp._project_caption_values({
+            "project_template": "navy_gold",
+            "project_settings": {"resolution": "1080x1920"},
+            "text_videos": "Old shared caption",
+            "text_photos": "",
+        })
+        self.assertEqual(video, "Old shared caption")
+        self.assertEqual(photo, "")
+        self.assertEqual(mode, "all")
+        self.assertEqual(shared, "Old shared caption")
+
 
 class TemplateRendererTests(unittest.TestCase):
     def test_templates_render_at_portrait_landscape_and_square_sizes(self):
