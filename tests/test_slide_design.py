@@ -98,6 +98,14 @@ class PresentationModelTests(unittest.TestCase):
             None, [2.0, 3.0, 4.0], transitions=[("none", 0.0), ("fade", 0.5), ("none", 0.0)])
         self.assertEqual(offsets, [0.0, 1.5, 4.5])
 
+    def test_ffmpeg_video_filter_chain_separates_color_and_scale_filters(self):
+        chain = MediaEditMixin.join_ffmpeg_filters(
+            "transpose=1,", "crop=iw*.8:ih*.8,scale=trunc(iw/2)*2:trunc(ih/2)*2,",
+            "colorlevels=rimin=0:rimax=.95,eq=saturation=1.0619",
+            "scale=1080:1068:force_original_aspect_ratio=increase,crop=1080:1068")
+        self.assertIn("eq=saturation=1.0619,scale=1080:1068", chain)
+        self.assertNotIn("saturation=1.0619scale", chain)
+
     def test_project_template_is_inherited_unless_slide_overrides_it(self):
         class ProjectRenderer(RenderMixin):
             project_template = "navy_gold"

@@ -382,6 +382,13 @@ class MediaEditMixin:
 
 
     @staticmethod
+    def join_ffmpeg_filters(*filters):
+        """Join filter expressions while removing their optional edge commas."""
+        return ",".join(part.strip(",") for part in filters
+                         if isinstance(part, str) and part.strip(","))
+
+
+    @staticmethod
     def video_trim(edit, full_dur):
         """(start, duration) seconds actually encoded for a video item."""
         ts = max(0.0, min(float((edit or {}).get("trim_start") or 0.0),

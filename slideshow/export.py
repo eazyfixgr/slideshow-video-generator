@@ -219,9 +219,10 @@ class ExportMixin:
                         rotate_part = self.video_rotate_filter(edit)
                         crop_part = self.video_crop_filter(edit)
                         color_part = self.video_color_filter(edit)
-                        vf = (rotate_part + crop_part + color_part +
-                              f"scale={rw}:{rh}:force_original_aspect_ratio=increase,"
-                              f"crop={rw}:{rh},setsar=1,format=rgba")
+                        size_part = (f"scale={rw}:{rh}:force_original_aspect_ratio=increase,"
+                                     f"crop={rw}:{rh},setsar=1,format=rgba")
+                        vf = self.join_ffmpeg_filters(rotate_part, crop_part,
+                                                      color_part, size_part)
                         in_args = (['-ss', f"{first_start:.3f}", '-i', str(path)] if first_start > 0.005
                                    else ['-i', str(path)])
                         cmd = (['ffmpeg', '-y'] + in_args +
@@ -247,13 +248,12 @@ class ExportMixin:
                         crop_part = self.video_crop_filter(edit)
                         color_part = self.video_color_filter(edit)
                         if self.settings["cropping"]:
-                            vf = (rotate_part + crop_part +
-                                  f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}")
+                            size_part = (f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                                         f"crop={width}:{height}")
                         else:
-                            vf = (rotate_part + crop_part +
-                                  f"scale={width}:{height}:force_original_aspect_ratio=decrease")
-                        if color_part:
-                            vf += "," + color_part
+                            size_part = (f"scale={width}:{height}:force_original_aspect_ratio=decrease")
+                        vf = self.join_ffmpeg_filters(rotate_part, crop_part,
+                                                      size_part, color_part)
                         in_args = (['-ss', f"{first_start:.3f}", '-i', str(path)] if first_start > 0.005
                                    else ['-i', str(path)])
                         cmd = (['ffmpeg', '-y'] + in_args +
