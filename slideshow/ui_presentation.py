@@ -476,6 +476,9 @@ class PresentationMixin:
         ttk.Button(button_row, text="Εφαρμογή τρέχοντος slide",
                    command=lambda: apply_current()).grid(
             row=2, column=1, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_row, text="Πλήρες σχέδιο → ΟΛΑ τα media",
+                   command=lambda: apply_design_all()).grid(
+            row=3, column=0, columnspan=2, sticky="ew", padx=2, pady=2)
 
         def choose_logo():
             path = filedialog.askopenfilename(
@@ -703,11 +706,10 @@ class PresentationMixin:
                                          compare_labels[0]))
             schedule_preview()
 
-        def apply_design_selected():
+        def apply_design_to(indices, status_text):
             values = current_data()
-            selected = set(getattr(self, "selected_indices", set()))
-            selected.add(idx)
-            for selected_idx in sorted(selected):
+            applied = 0
+            for selected_idx in sorted(set(indices)):
                 if not 0 <= selected_idx < len(self.media_files):
                     continue
                 target = self.media_files[selected_idx][2]
@@ -715,11 +717,22 @@ class PresentationMixin:
                 for key in DESIGN_KEYS:
                     current[key] = copy.deepcopy(values[key])
                 target["presentation"] = normalize_presentation(current,
-                                                                 scene_id=current["scene_id"])
-            self.is_modified = True
-            self.update_media_display()
-            self._schedule_preview()
-            preview_status.config(text=f"Σχέδιο εφαρμόστηκε σε {len(selected)} επιλεγμένα media")
+                                                                  scene_id=current["scene_id"])
+                applied += 1
+            if applied:
+                self.is_modified = True
+                self.update_media_display()
+                self._schedule_preview()
+            preview_status.config(text=status_text.format(count=applied))
+
+        def apply_design_selected():
+            selected = set(getattr(self, "selected_indices", set()))
+            selected.add(idx)
+            apply_design_to(selected, "Πλήρες σχέδιο εφαρμόστηκε σε {count} επιλεγμένα media")
+
+        def apply_design_all():
+            apply_design_to(range(len(self.media_files)),
+                            "Πλήρες σχέδιο εφαρμόστηκε σε {count} media")
 
         def apply_template_to(indices):
             template = current_data()["template"]

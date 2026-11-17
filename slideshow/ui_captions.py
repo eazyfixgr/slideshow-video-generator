@@ -170,8 +170,8 @@ class CaptionsMixin:
         project_template_combo.grid(row=0, column=1, sticky="ew", padx=(0, 8))
         style_status = ttk.Label(style_bar, text="", foreground="#2d6cdf")
         style_status.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        apply_project_template_button = ttk.Button(style_bar, text="Εφαρμογή σε όλα τα media")
-        apply_project_template_button.grid(row=0, column=2, rowspan=2, padx=(0, 2))
+        design_button = ttk.Button(style_bar, text="Σχεδίαση")
+        design_button.grid(row=0, column=2, rowspan=2, padx=(0, 2))
 
         strategy_tabs = ttk.Notebook(outer)
         strategy_tabs.grid(row=1, column=0, sticky="nsew")
@@ -289,7 +289,8 @@ class CaptionsMixin:
                 text=f"{TEMPLATES[template]} εφαρμόστηκε σε {len(self.media_files)} media. "
                      "Τα captions διατηρήθηκαν.")
 
-        apply_project_template_button.config(command=apply_project_template_to_all)
+        project_template_combo.bind(
+            "<<ComboboxSelected>>", lambda _event: apply_project_template_to_all(), add="+")
 
         project_preview_job = {"id": None}
 
@@ -356,6 +357,34 @@ class CaptionsMixin:
         media_tabs.add(photo_page, text="  Photo Captions  ")
         video_state = self._build_media_caption_page(video_page, dialog, "video", instructions)
         photo_state = self._build_media_caption_page(photo_page, dialog, "image", instructions)
+
+        def open_project_design():
+            video_state["save_current"]()
+            photo_state["save_current"]()
+            sync_project_caption()
+            try:
+                dialog.grab_release()
+            except tk.TclError:
+                pass
+            design_dialog = self.open_storyboard_editor()
+
+            def restore_caption_dialog(event):
+                if event.widget is not design_dialog:
+                    return
+                try:
+                    if dialog.winfo_exists():
+                        project_template_var.set(
+                            TEMPLATES.get(self.project_template, TEMPLATES["legacy"]))
+                        schedule_project_preview()
+                        video_state["refresh_preview"]()
+                        photo_state["refresh_preview"]()
+                        dialog.grab_set()
+                except tk.TclError:
+                    pass
+
+            design_dialog.bind("<Destroy>", restore_caption_dialog, add="+")
+
+        design_button.config(command=open_project_design)
 
         strategy_job = {"id": None}
 
