@@ -504,6 +504,14 @@ class CaptionsMixin:
         tree.configure(yscrollcommand=scroll.set)
         tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        group_box = ttk.LabelFrame(tree_box, text="Μέλη του group", padding=4)
+        group_count = ttk.Label(group_box, text="Δεν έχει επιλεγεί group.",
+                                font=("Calibri", 9, "bold"))
+        group_count.pack(anchor="w", pady=(0, 3))
+        group_members = scrolledtext.ScrolledText(
+            group_box, height=4, wrap=tk.WORD, font=("Calibri", 9), state=tk.DISABLED)
+        group_members.pack(fill="x", expand=True)
+        group_box.pack(fill="x", pady=(6, 0))
 
         thumb_refs = {}
         for index, path, _edit in media:
@@ -626,6 +634,18 @@ class CaptionsMixin:
                     "subtitle": subtitle_var.get().strip(),
                     "description": description.get("1.0", "end-1c").strip()}
 
+        def refresh_group_summary(selected_indices=None):
+            if selected_indices is None:
+                selected_indices = [int(item_id) for item_id in tree.selection()]
+            group_count.config(text=f"Μέλη του group: {len(selected_indices)} media")
+            names = [Path(self.media_files[index][1]).name for index in selected_indices
+                     if 0 <= index < len(self.media_files)]
+            group_members.config(state=tk.NORMAL)
+            group_members.delete("1.0", tk.END)
+            group_members.insert("1.0", "\n".join(f"• {name}" for name in names) or
+                                 "Δεν έχει επιλεγεί media. Κάνε Ctrl/Shift+κλικ στη λίστα.")
+            group_members.config(state=tk.DISABLED)
+
         def write_item_caption(index, values):
             if not 0 <= index < len(self.media_files):
                 return
@@ -678,8 +698,11 @@ class CaptionsMixin:
                     save_current()
                     load_current(index)
             elif state["mode"] == "group":
-                hint.config(text=f"Επιλεγμένα: {len(selected_indices)}. Το caption αντιγράφεται στα media "
-                                 "και μετά μπορούν να αλλάξουν ανεξάρτητα.")
+                refresh_group_summary(selected_indices)
+                caption_title_label.config(text=f"Caption για group ({len(selected_indices)} media)")
+                apply_caption.state(["!disabled"] if selected_indices else ["disabled"])
+                hint.config(text="Το κείμενο παρακάτω θα εφαρμοστεί μόνο στα media που εμφανίζονται "
+                                 "στη λίστα «Μέλη του group».")
                 schedule_preview()
             else:
                 schedule_preview()
@@ -691,6 +714,10 @@ class CaptionsMixin:
                 index = state.get("current") or (media[0][0] if media else None)
                 edit_override = None
             elif state["mode"] == "group":
+                if not selected_indices:
+                    preview.delete("all")
+                    preview_status.config(text="Επίλεξε media για να δεις το preview του group.")
+                    return
                 index = selected_indices[0] if selected_indices else (media[0][0] if media else None)
                 edit_override = copy.deepcopy(self.media_files[index][2]) if index is not None else None
                 if edit_override is not None:
@@ -748,10 +775,16 @@ class CaptionsMixin:
                     title_var.set("")
                     subtitle_var.set("")
                     description.delete("1.0", tk.END)
-                    caption_title_label.config(text="Κοινό caption σε επιλεγμένη ομάδα")
+                    caption_title_label.config(text="Caption για group (0 media)")
                     apply_caption.config(text="Εφαρμογή στα επιλεγμένα")
-                    apply_caption.state(["!disabled"])
-                    hint.config(text="Επίλεξε media με Ctrl/Shift, γράψε caption και πάτα Εφαρμογή.")
+                    apply_caption.state(["disabled"])
+                    refresh_group_summary([])
+                    hint.config(text="1. Επίλεξε media με Ctrl/Shift+κλικ. 2. Γράψε το caption. "
+                                     "3. Πάτησε «Εφαρμογή στα επιλεγμένα».")
+            if new_mode == "group":
+                group_box.pack(fill="x", pady=(6, 0))
+            else:
+                group_box.pack_forget()
             schedule_preview()
 
         def sync_shared_text(_event=None, force=False):
@@ -803,15 +836,31 @@ class CaptionsMixin:
                     return
                 for index in selected_indices:
                     write_item_caption(index, caption_values())
+                refresh_group_summary(selected_indices)
+                hint.config(text=f"Το caption εφαρμόστηκε στα {len(selected_indices)} media του group. "
+                                 "Τα captions αποθηκεύτηκαν ξεχωριστά ανά media.")
                 preview_status.config(text=f"Caption εφαρμόστηκε σε {len(selected_indices)} media")
             self.update_media_display()
             self._schedule_preview()
             schedule_preview()
 
+        selection_refresh = {"job": None}
+
+        def queue_tree_selection(_event=None):
+            if selection_refresh["job"]:
+                try:
+                    dialog.after_cancel(selection_refresh["job"])
+                except tk.TclError:
+                    pass
+            selection_refresh["job"] = dialog.after_idle(
+                lambda: (selection_refresh.update(job=None), tree_selection()))
+
         shared_text.bind("<KeyRelease>", sync_shared_text, add="+")
         self._bind_captions_text(shared_text, lambda: sync_shared_text())
         mode_combo.bind("<<ComboboxSelected>>", mode_changed, add="+")
-        tree.bind("<<TreeviewSelect>>", tree_selection)
+        tree.bind("<<TreeviewSelect>>", queue_tree_selection)
+        tree.bind("<ButtonRelease-1>", queue_tree_selection, add="+")
+        tree.bind("<KeyRelease>", queue_tree_selection, add="+")
         title_var.trace_add("write", caption_changed)
         subtitle_var.trace_add("write", caption_changed)
         self._bind_captions_text(description, lambda: caption_changed())
