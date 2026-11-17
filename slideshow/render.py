@@ -130,14 +130,13 @@ class RenderMixin:
         """Render a still frame through the shared slide template engine."""
         presentation = self._presentation_for(edit)
         fields = self._presentation_fields(presentation, m_type, global_text)
-        fallback = source if presentation["template"] != "before_after" else None
-        before = self._presentation_before_image(presentation, fallback=fallback)
+        before = self._presentation_before_image(presentation, fallback=source)
         frame, overflow = compose_design_frame(
             source, width, height, presentation, fields, before_image=before)
         return frame, overflow
 
 
-    def render_text_on_image(self, img, text, w, h):
+    def render_text_on_image(self, img, text, w, h, align="left"):
         if not text:
             return img
         img = img.copy().convert("RGBA")
@@ -150,15 +149,26 @@ class RenderMixin:
         y = h - (len(lines) * lh) - 15
         if self.settings["text_style"] == "black_box" and lines:
             max_lw = max([l[1] for l in lines])
-            draw.rectangle([(w-max_lw)//2-15, y-5, (w+max_lw)//2+15, h-5], fill=(255,255,255,255))
+            box_x = self._legacy_text_x(w, max_lw, align)
+            draw.rectangle([box_x - 15, y - 5, box_x + max_lw + 15, h - 5],
+                           fill=(255, 255, 255, 255))
         for lp, lw in lines:
-            x = (w - lw) // 2
+            x = self._legacy_text_x(w, lw, align)
             for is_b, txt in lp:
                 f = f_bold if is_b else font
                 draw.text((x, y), txt, font=f, fill="black")
                 x += f.getlength(txt)
             y += lh
         return img
+
+
+    @staticmethod
+    def _legacy_text_x(width, line_width, align):
+        if align == "right":
+            return width - line_width - 15
+        if align == "center":
+            return (width - line_width) // 2
+        return 15
 
 
     def _wrap_text_lines(self, text, w, fs=None):
@@ -261,14 +271,14 @@ class RenderMixin:
         return bg.crop((x0, y0, x0 + tw, y0 + th)).filter(ImageFilter.GaussianBlur(30))
 
 
-    def _make_text_overlay(self, text, width, height):
+    def _make_text_overlay(self, text, width, height, align="left"):
         """Precompute the text overlay (white box + text on a transparent layer)
         once, so it can be pasted onto every frame cheaply instead of re-rendering
         the text 120 times per photo."""
         if not text:
             return None
         base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        return self.render_text_on_image(base, text, width, height)
+        return self.render_text_on_image(base, text, width, height, align=align)
 
 
     def _render_fit_and_move_frame(self, bg, fit_move_data, pos, width, height, overlay=None):
@@ -292,7 +302,8 @@ class RenderMixin:
         return frame
 
 
-    def _render_fit_and_move_clip(self, bg, fit_move_data, temp_dir, index, width, height, image_duration, clip_path):
+    def _render_fit_and_move_clip(self, bg, fit_move_data, temp_dir, index, width, height,
+                                  image_duration, clip_path, text_align="left"):
         """Render a slow pan clip for the 'Fit and Move' background mode.
 
         The foreground image was already zoomed in ``_fit_image_logic`` so it
@@ -309,7 +320,8 @@ class RenderMixin:
         fps = 30
         total_frames = max(1, int(image_duration * fps))
         forward = random.choice([True, False])
-        overlay = self._make_text_overlay(self.get_text_for("image"), width, height)
+        overlay = self._make_text_overlay(self.get_text_for("image"), width, height,
+                                          align=text_align)
         self._log_export(f"fit_and_move img {index}: is_landscape={is_landscape} "
                          f"available_h={available_h} fg={fg.size} frames={total_frames} "
                          f"direction={'L->R' if forward else 'R->L'}")

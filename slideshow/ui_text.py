@@ -313,11 +313,14 @@ class TextInputMixin:
             frame = self._fit_image_logic(img, w, h, "image", text=resolved)
             fit_move_data = getattr(frame, 'fit_move_data', None)
             if fit_move_data is not None:
-                overlay = self._make_text_overlay(resolved, w, h)
+                overlay = self._make_text_overlay(
+                    resolved, w, h, align=presentation["text_align"])
                 return self._render_fit_and_move_frame(frame, fit_move_data, 0.0, w, h, overlay)
-            return self.render_text_on_image(frame, resolved, w, h)
+            return self.render_text_on_image(frame, resolved, w, h,
+                                             align=presentation["text_align"])
         frame = self._render_video_first_frame(img, w, h)
-        return self.render_text_on_image(frame, resolved, w, h)
+        return self.render_text_on_image(frame, resolved, w, h,
+                                         align=presentation["text_align"])
 
 
     def _show_dialog_preview(self, canvas, frame, w, h):

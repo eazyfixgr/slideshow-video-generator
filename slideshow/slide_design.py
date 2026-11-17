@@ -13,18 +13,30 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 TEMPLATES = {
-    "legacy": "Κλασικό (παλιά εμφάνιση)",
+    "legacy": "Απλό",
     "navy_gold": "Elegant Navy & Gold",
-    "cinematic": "Full-Screen Cinematic",
-    "lower_third": "Modern Lower Third",
-    "split_editorial": "Split Editorial Layout",
-    "real_estate": "Real Estate Property",
-    "business_service": "Business Service Card",
+    "cinematic": "Υπότιτλος",
+    "lower_third": "Navy & Gold Transparent",
     "intro_outro": "Introduction / Outro",
-    "before_after": "Before / After",
 }
 INHERIT_TEMPLATE = "project"
 INHERIT_TEMPLATE_LABEL = "Use Project Default"
+TEMPLATE_ALIASES = {
+    "real_estate": "navy_gold",
+    "split_editorial": "navy_gold",
+    "business_service": "navy_gold",
+    "before_after": "navy_gold",
+}
+
+
+def normalize_template(value, fallback="legacy"):
+    """Resolve removed template names while keeping old projects renderable."""
+    if value == INHERIT_TEMPLATE:
+        return INHERIT_TEMPLATE
+    if not isinstance(value, str):
+        return fallback
+    value = TEMPLATE_ALIASES.get(value, value)
+    return value if value in TEMPLATES else fallback
 
 FONT_FILES = {
     "Calibri": ("calibri.ttf", "calibrib.ttf"),
@@ -50,13 +62,16 @@ DEFAULT_PRESENTATION = {
     "website": "",
     "before_label": "ΠΡΙΝ",
     "after_label": "ΜΕΤΑ",
-    "text_position": "template",
+    "text_position": "bottom",
+    "text_align": "left",
     "font_family": "",
     "font_size": 0,
     "text_color": "#FFFFFF",
     "panel_color": "#111B2B",
     "accent_color": "#D6B86A",
     "panel_style": "solid",
+    "featured_enabled": True,
+    "featured_text": "FEATURED",
     "duration": None,
     "logo_enabled": False,
     "logo_path": "",
@@ -67,7 +82,8 @@ DEFAULT_PRESENTATION = {
 }
 
 _MODES = {"global", "custom", "none", "combine"}
-_TEXT_POSITIONS = {"template", "top", "center", "bottom"}
+_TEXT_POSITIONS = {"top", "center", "bottom"}
+_TEXT_ALIGNMENTS = {"left", "center", "right"}
 _PANEL_STYLES = {"solid", "translucent"}
 _TRANSITIONS = {"global", "none", "fade", "fadeblack", "fadewhite", "wipeleft",
                 "wiperight", "wipeup", "wipedown", "smoothleft", "smoothright"}
@@ -76,24 +92,34 @@ _TRANSITIONS = {"global", "none", "fade", "fadeblack", "fadewhite", "wipeleft",
 def normalize_presentation(value=None, scene_id=None):
     """Return validated presentation data, preserving unknown future fields."""
     data = dict(DEFAULT_PRESENTATION)
-    if isinstance(value, dict):
-        data.update(value)
+    source = value if isinstance(value, dict) else {}
+    data.update(source)
     data["scene_id"] = str(data.get("scene_id") or scene_id or uuid.uuid4().hex)
     if not isinstance(data.get("mode"), str) or data.get("mode") not in _MODES:
         data["mode"] = "global"
-    if (not isinstance(data.get("template"), str) or
-            (data.get("template") not in TEMPLATES and
-             data.get("template") != INHERIT_TEMPLATE)):
-        data["template"] = INHERIT_TEMPLATE
-    if not isinstance(data.get("text_position"), str) or data.get("text_position") not in _TEXT_POSITIONS:
-        data["text_position"] = "template"
+    old_template = source.get("template")
+    data["template"] = normalize_template(data.get("template"), INHERIT_TEMPLATE)
+    if old_template == "real_estate" and "featured_text" not in source:
+        data["featured_text"] = str(source.get("category") or "PROPERTY")
+    elif (isinstance(old_template, str) and old_template in TEMPLATE_ALIASES and
+          "featured_enabled" not in source):
+        data["featured_enabled"] = False
+        if "featured_text" not in source:
+            data["featured_text"] = ""
+    if (data.get("text_position") == "template" or
+            not isinstance(data.get("text_position"), str) or
+            data.get("text_position") not in _TEXT_POSITIONS):
+        data["text_position"] = "bottom"
+    if not isinstance(data.get("text_align"), str) or data.get("text_align") not in _TEXT_ALIGNMENTS:
+        data["text_align"] = "left"
     if not isinstance(data.get("panel_style"), str) or data.get("panel_style") not in _PANEL_STYLES:
         data["panel_style"] = "solid"
     if not isinstance(data.get("transition"), str) or data.get("transition") not in _TRANSITIONS:
         data["transition"] = "global"
     for key in ("title", "subtitle", "description", "category", "location", "price",
                 "details", "cta", "business_name", "phone", "website", "logo_path",
-                "compare_path", "font_family", "transition", "before_label", "after_label"):
+                "compare_path", "font_family", "transition", "before_label", "after_label",
+                "featured_text"):
         data[key] = str(data.get(key) or "")
     for key, fallback in (("text_color", "#FFFFFF"), ("panel_color", "#111B2B"),
                           ("accent_color", "#D6B86A")):
@@ -116,6 +142,7 @@ def normalize_presentation(value=None, scene_id=None):
     data["transition_duration"] = (round(max(0.2, min(2.0, transition_duration)), 2)
                                    if transition_duration else None)
     data["logo_enabled"] = bool(data.get("logo_enabled"))
+    data["featured_enabled"] = bool(data.get("featured_enabled"))
     motion = data.get("motion")
     data["motion"] = dict(motion) if isinstance(motion, dict) else {"preset": "static"}
     return data
@@ -458,7 +485,7 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
             panel_w = min(w - margin * 2,
                           max(int(w * 0.22), int(content_w + 2 * pad)))
             panel_x = (w - panel_w) // 2
-            position = p.get("text_position", "template")
+            position = p.get("text_position", "bottom")
             if position == "top":
                 panel_y = margin
             elif position == "center":
@@ -541,18 +568,17 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
         return bool(any(fields.values()))
     family = p.get("font_family") or "Calibri"
     min_side = min(draw._image.size) if getattr(draw, "_image", None) else min(bw, bh)
-    auto_title = max(22, min(96, int(min_side * (0.065 if p["template"] != "lower_third" else 0.052))))
+    auto_title = max(22, min(96, int(min_side * 0.065)))
     title_size = p["font_size"] or auto_title
-    title_size = min(title_size, max(18, int(bh * .31)))
     title = fields.get("title", "") or ""
     subtitle = fields.get("subtitle", "") or ""
     description = fields.get("description", "") or ""
     metadata = [fields.get(k, "") for k in ("location", "price", "details") if fields.get(k)]
     business = fields.get("business_name", "") or ""
     contact = "  •  ".join(v for v in (fields.get("phone", ""), fields.get("website", "")) if v)
-    category = fields.get("category", "") or (
-        "PROPERTY" if p["template"] == "real_estate" else
-        ("FEATURED" if p["template"] == "navy_gold" else ""))
+    category = fields.get("category", "")
+    if p["template"] == "navy_gold":
+        category = ((p["featured_text"] or category) if p["featured_enabled"] else "")
     cta = fields.get("cta", "") or ""
     scale = 1.0
     parts = []
@@ -562,7 +588,7 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
         if category:
             size = max(10, int(min_side * .021 * scale))
             font = _font(family, size, True)
-            lines = _wrap(category.upper(), font, bw)
+            lines = _wrap(category, font, bw)
             parts.append(("category", lines, font, accent, size + 3))
             cursor += len(lines) * (size + 3) + max(4, margin // 5)
         if title:
@@ -612,7 +638,7 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
                           for line in lines), default=0)
     if measure_only:
         return overflow, content_height, max_line_width
-    position = p.get("text_position", "template")
+    position = p.get("text_position", "bottom")
     if position == "center":
         y = box_y + max(0, (bh - content_height) // 2)
     elif position == "bottom":
@@ -620,24 +646,43 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
     else:
         y = box_y
     cursor = y
+    text_align = p["text_align"]
+
+    def aligned_x(line_width):
+        if text_align == "center":
+            return x + max(0, (bw - line_width) // 2)
+        if text_align == "right":
+            return x + max(0, bw - line_width)
+        return x
+
     for name, lines, font, color, line_h in parts:
-        if name == "category" and p["template"] in ("navy_gold", "real_estate"):
+        if name == "category" and p["template"] == "navy_gold":
             line = lines[0] if lines else ""
-            draw.rounded_rectangle((x, cursor, x + max(1, _text_width(font, line) + 16), cursor + line_h + 5),
+            line_width = int(_line_width(line, font, family))
+            category_x = aligned_x(line_width + 16)
+            draw.rounded_rectangle((category_x, cursor,
+                                    category_x + max(1, line_width + 16), cursor + line_h + 5),
                                    radius=max(2, line_h // 4), fill=_color_rgba(accent, 36),
                                    outline=_color_rgba(accent, 170), width=1)
-            draw.text((x + 8, cursor + 2), line, font=font, fill=color)
+            draw.text((category_x + 8, cursor + 2), line, font=font, fill=color)
             cursor += line_h + max(7, margin // 5)
             continue
+        stroke_width = (max(1, round(getattr(font, "size", 12) * .035))
+                        if p["template"] == "cinematic" else 0)
         for line in lines:
+            line_x = aligned_x(int(_line_width(line, font, family)))
             if isinstance(line, str):
-                draw.text((x, cursor), line, font=font, fill=color)
+                draw.text((line_x, cursor), line, font=font, fill=color,
+                          stroke_width=stroke_width,
+                          stroke_fill="#000000" if stroke_width else None)
             else:
-                text_x = x
+                text_x = line_x
                 bold_font = _font(family, getattr(font, "size", 12), True)
                 for is_bold, segment in line:
                     segment_font = bold_font if is_bold else font
-                    draw.text((text_x, cursor), segment, font=segment_font, fill=color)
+                    draw.text((text_x, cursor), segment, font=segment_font, fill=color,
+                              stroke_width=stroke_width,
+                              stroke_fill="#000000" if stroke_width else None)
                     text_x += _text_width(segment_font, segment)
             cursor += line_h
         cursor += max(2, margin // 8)

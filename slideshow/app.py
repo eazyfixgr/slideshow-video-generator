@@ -36,7 +36,7 @@ from .ui_text import TextInputMixin
 from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
 from .ui_presentation import PresentationMixin
 from .ui_captions import CaptionsMixin
-from .slide_design import TEMPLATES
+from .slide_design import normalize_template
 from .ui_welcome import WelcomeMixin
 from .ui_theme import ThemeMixin
 
@@ -722,8 +722,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
                     self.settings[key] = copy.deepcopy(self._global_settings[key])
         had_project_template = "project_template" in data
         project_template = data.get("project_template", "legacy")
-        self.project_template = (project_template if isinstance(project_template, str)
-                                 and project_template in TEMPLATES else "legacy")
+        self.project_template = normalize_template(project_template)
         self.project_settings = self._normalize_project_settings(
             data.get("project_settings", {}))
         self._active_project_settings = bool(self.project_settings)

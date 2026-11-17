@@ -34,14 +34,6 @@ class ExportMixin:
                 "Παρακαλώ γράψε ένα όνομα για το project πριν κάνεις Generate Video!"
             )
             return
-        for index, (_m_type, _path, edit) in enumerate(self.media_files):
-            presentation = self._presentation_for(edit)
-            if presentation["template"] == "before_after" and not Path(
-                    presentation.get("compare_path", "")).is_file():
-                messagebox.showwarning(
-                    "Before / After",
-                    f"Διάλεξε υπαρκτή φωτογραφία «ΠΡΙΝ» για το slide {index + 1} πριν το export.")
-                return
         out_folder = self.out_var.get().strip()
         if not out_folder:
             if not self._ensure_output_folder():
@@ -159,7 +151,8 @@ class ExportMixin:
                         fit_move_data = getattr(img, 'fit_move_data', None)
                         if fit_move_data is None:
                             png_path = temp_dir / f"frame_{i:04d}.png"
-                            img = self.render_text_on_image(img, text, width, height)
+                            img = self.render_text_on_image(
+                                img, text, width, height, align=presentation["text_align"])
                             img.save(str(png_path), "PNG")
                             cmd = ['ffmpeg', '-y', '-loop', '1', '-i', str(png_path),
                                    '-t', str(item_duration), '-c:v', 'libx264',
@@ -170,7 +163,8 @@ class ExportMixin:
                         else:
                             clip_dur = self._render_fit_and_move_clip(
                                 img, fit_move_data, temp_dir, i, width, height,
-                                item_duration, clip_path)
+                                item_duration, clip_path,
+                                text_align=presentation["text_align"])
                 else:
                     # Duration via ffprobe. MoviePy's VideoFileClip reads a full
                     # frame just to open the clip and can fail on files ffmpeg
@@ -214,8 +208,7 @@ class ExportMixin:
                     first_f = self._apply_image_edit(self._video_first_frame(path), edit, m_type="video")
                     if presentation["template"] != "legacy":
                         fields = self._presentation_fields(presentation, "video")
-                        fallback = first_f if presentation["template"] != "before_after" else None
-                        before = self._presentation_before_image(presentation, fallback=fallback)
+                        before = self._presentation_before_image(presentation, fallback=first_f)
                         base, txt_overlay, rect, overflow = render_design_layers(
                             width, height, presentation, fields, before_image=before)
                         if overflow:
@@ -244,7 +237,8 @@ class ExportMixin:
                     else:
                         text = self._presentation_text(presentation, "video")
                         txt_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-                        txt_overlay = self.render_text_on_image(txt_overlay, text, width, height)
+                        txt_overlay = self.render_text_on_image(
+                            txt_overlay, text, width, height, align=presentation["text_align"])
                         txt_overlay.save(str(txt_p), "PNG")
                         self._create_blur_bg(first_f, width, height).save(str(bg_p), "PNG")
 

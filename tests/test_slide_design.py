@@ -18,6 +18,7 @@ from slideshow.media_edit import MediaEditMixin
 from slideshow.export import ExportMixin
 from slideshow.render import RenderMixin
 from slideshow.app import SlideshowApp
+from slideshow.deps import np
 
 
 class PresentationModelTests(unittest.TestCase):
@@ -58,7 +59,7 @@ class PresentationModelTests(unittest.TestCase):
 
     def test_presentation_round_trips_as_project_json(self):
         presentation = normalize_presentation({
-            "mode": "custom", "template": "real_estate", "title": "Ακίνητο",
+            "mode": "custom", "template": "navy_gold", "title": "Ακίνητο",
             "duration": 7.5, "transition": "fadeblack", "transition_duration": 1.2,
         })
         encoded = json.dumps({"media_files": [["image", "photo.jpg", {
@@ -105,9 +106,9 @@ class PresentationModelTests(unittest.TestCase):
             object.__new__(ProjectRenderer), {"presentation": normalize_presentation()})
         explicit = ProjectRenderer._presentation_for(
             object.__new__(ProjectRenderer), {
-                "presentation": normalize_presentation({"template": "real_estate"})})
+                "presentation": normalize_presentation({"template": "cinematic"})})
         self.assertEqual(inherited["template"], "navy_gold")
-        self.assertEqual(explicit["template"], "real_estate")
+        self.assertEqual(explicit["template"], "cinematic")
 
         renderer = object.__new__(ProjectRenderer)
         stored = normalize_presentation({"scene_id": "slide-1", "template": "legacy"})
@@ -227,6 +228,93 @@ class TemplateRendererTests(unittest.TestCase):
         _base, _overlay, long_rect, _overflow = render_design_layers(
             720, 1280, presentation, long)
         self.assertGreater(short_rect[3], long_rect[3])
+
+    def test_template_choices_aliases_and_defaults(self):
+        self.assertEqual(TEMPLATES["legacy"], "Απλό")
+        self.assertEqual(TEMPLATES["cinematic"], "Υπότιτλος")
+        self.assertEqual(TEMPLATES["lower_third"], "Navy & Gold Transparent")
+        for removed in ("real_estate", "split_editorial", "business_service", "before_after"):
+            self.assertNotIn(removed, TEMPLATES)
+            self.assertEqual(normalize_presentation({"template": removed})["template"],
+                             "navy_gold")
+        old_real_estate = normalize_presentation({"template": "real_estate"})
+        self.assertTrue(old_real_estate["featured_enabled"])
+        self.assertEqual(old_real_estate["featured_text"], "PROPERTY")
+        self.assertEqual(old_real_estate["text_position"], "bottom")
+        self.assertEqual(old_real_estate["text_align"], "left")
+        self.assertFalse(normalize_presentation({
+            "template": "business_service"})["featured_enabled"])
+        self.assertEqual(normalize_presentation({
+            "text_position": "template", "text_align": "justify"})["text_position"], "bottom")
+        self.assertEqual(normalize_presentation({"text_align": "justify"})["text_align"], "left")
+
+    def test_navy_gold_featured_badge_can_be_disabled_or_renamed(self):
+        source = Image.new("RGB", (640, 800), "#52677A")
+        fields = {"title": "Bright apartment"}
+        default_badge = normalize_presentation({
+            "template": "navy_gold", "mode": "custom", "featured_enabled": True,
+            "featured_text": "FEATURED",
+        })
+        custom_badge = normalize_presentation({
+            "template": "navy_gold", "mode": "custom", "featured_enabled": True,
+            "featured_text": "JUST LISTED",
+        })
+        hidden_badge = normalize_presentation({
+            "template": "navy_gold", "mode": "custom", "featured_enabled": False,
+        })
+        default_frame, _ = compose_design_frame(source, 720, 1280, default_badge, fields)
+        custom_frame, _ = compose_design_frame(source, 720, 1280, custom_badge, fields)
+        hidden_frame, _ = compose_design_frame(source, 720, 1280, hidden_badge, fields)
+        self.assertNotEqual(default_frame.tobytes(), custom_frame.tobytes())
+        self.assertNotEqual(default_frame.tobytes(), hidden_frame.tobytes())
+
+    def test_subtitle_template_uses_black_outline_and_bottom_default(self):
+        self.assertEqual(normalize_presentation()["text_position"], "bottom")
+        presentation = normalize_presentation({"template": "cinematic", "mode": "custom"})
+        _base, overlay, _rect, _overflow = render_design_layers(
+            720, 1280, presentation, {"title": "Movie subtitle"})
+        pixels = overlay.load()
+        black_outline_pixels = sum(
+            1 for y in range(overlay.height) for x in range(overlay.width)
+            if pixels[x, y][3] == 255 and pixels[x, y][:3] == (0, 0, 0))
+        self.assertGreater(black_outline_pixels, 0)
+
+    def test_non_legacy_text_alignment_changes_template_layout(self):
+        source = Image.new("RGB", (640, 800), "#52677A")
+        fields = {"title": "Bright home", "description": "Natural light and open spaces."}
+        left = normalize_presentation({"template": "navy_gold", "text_align": "left"})
+        right = normalize_presentation({"template": "navy_gold", "text_align": "right"})
+        left_frame, _ = compose_design_frame(source, 720, 1280, left, fields)
+        right_frame, _ = compose_design_frame(source, 720, 1280, right, fields)
+        self.assertNotEqual(left_frame.tobytes(), right_frame.tobytes())
+
+    def test_transparent_template_respects_large_font_size(self):
+        source = Image.new("RGB", (800, 600), "#52677A")
+        fields = {"title": "PROPERTY TITLE"}
+
+        def bright_text_pixels(size):
+            presentation = normalize_presentation({
+                "template": "lower_third", "mode": "custom", "font_size": size,
+            })
+            _base, overlay, _rect, _overflow = render_design_layers(
+                720, 1280, presentation, fields)
+            pixels = np.asarray(overlay)
+            return int(np.count_nonzero((pixels[:, :, :3].min(axis=2) > 245) &
+                                        (pixels[:, :, 3] > 0)))
+
+        self.assertGreater(bright_text_pixels(90), bright_text_pixels(0))
+
+    def test_legacy_template_alignment_defaults_left_and_can_be_changed(self):
+        class ClassicRenderer(RenderMixin):
+            settings = {"font_size": 24, "font_family": "Arial", "text_style": "black_box"}
+
+        renderer = object.__new__(ClassicRenderer)
+        source = Image.new("RGBA", (400, 240), (0, 0, 0, 0))
+        left = renderer.render_text_on_image(source, "Classic caption", 400, 240)
+        right = renderer.render_text_on_image(source, "Classic caption", 400, 240,
+                                              align="right")
+        self.assertEqual(left.getchannel("A").getbbox()[0], 0)
+        self.assertEqual(right.getchannel("A").getbbox()[2], 400)
 
 
 if __name__ == "__main__":

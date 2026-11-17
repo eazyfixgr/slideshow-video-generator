@@ -148,10 +148,12 @@ class PreviewMixin:
                 fit_move_data = getattr(frame, 'fit_move_data', None)
                 if fit_move_data is not None:
                     # Actual first frame of the pan animation (t=0), not the middle.
-                    overlay = self._make_text_overlay(text, w, h)
+                    overlay = self._make_text_overlay(text, w, h,
+                                                      align=presentation["text_align"])
                     frame = self._render_fit_and_move_frame(frame, fit_move_data, 0.0, w, h, overlay)
                 else:
-                    frame = self.render_text_on_image(frame, text, w, h)
+                    frame = self.render_text_on_image(frame, text, w, h,
+                                                      align=presentation["text_align"])
         else:
             if t_start > 0.005:
                 raw = self._video_frame_at(path, t_start)
@@ -162,7 +164,8 @@ class PreviewMixin:
                 frame, _overflow = self._render_design_frame(first, edit, "video", w, h)
             else:
                 frame = self._render_video_first_frame(first, w, h)
-                frame = self.render_text_on_image(frame, text, w, h)
+                frame = self.render_text_on_image(frame, text, w, h,
+                                                  align=presentation["text_align"])
 
         frame = self._apply_watermark_overlay(frame)
         full = frame.copy()

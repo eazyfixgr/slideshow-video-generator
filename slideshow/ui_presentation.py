@@ -11,7 +11,7 @@ from .deps import Image, ImageTk
 from .slide_design import (DEFAULT_PRESENTATION, TEMPLATES, compose_design_frame,
                            INHERIT_TEMPLATE, INHERIT_TEMPLATE_LABEL,
                            has_presentation_settings, normalize_presentation,
-                           presentation_fields)
+                           normalize_template, presentation_fields)
 
 
 MODE_LABELS = {
@@ -21,12 +21,13 @@ MODE_LABELS = {
     "Custom + Global": "combine",
 }
 MODE_BY_VALUE = {value: label for label, value in MODE_LABELS.items()}
-POSITION_LABELS = {"Αυτόματο template": "template", "Πάνω": "top",
-                   "Κέντρο": "center", "Κάτω": "bottom"}
+POSITION_LABELS = {"Πάνω": "top", "Κέντρο": "center", "Κάτω": "bottom"}
+ALIGNMENT_LABELS = {"Αριστερά": "left", "Κέντρο": "center", "Δεξιά": "right"}
 PANEL_STYLE_LABELS = {"Συμπαγές": "solid", "Ημιδιαφανές": "translucent"}
-DESIGN_KEYS = ("template", "text_position", "font_family", "font_size", "text_color",
-               "panel_color", "accent_color", "panel_style", "duration", "logo_enabled",
-               "logo_path", "compare_path", "transition", "transition_duration", "motion")
+DESIGN_KEYS = ("template", "text_position", "text_align", "featured_enabled", "featured_text",
+               "font_family", "font_size", "text_color", "panel_color", "accent_color",
+               "panel_style", "duration", "logo_enabled", "logo_path",
+               "transition", "transition_duration", "motion")
 class PresentationMixin:
     """Build the Presentation tab used by both photo and video editors."""
 
@@ -113,6 +114,9 @@ class PresentationMixin:
             refresh = getattr(panel, "refresh_presentation_preview", None) if panel else None
             if refresh:
                 refresh()
+            refresh_badge = getattr(panel, "refresh_featured_controls", None) if panel else None
+            if refresh_badge:
+                refresh_badge()
 
         default_template_var.trace_add("write", set_project_template)
 
@@ -260,11 +264,10 @@ class PresentationMixin:
         add_text("Περιγραφή", "description", 4)
 
         advanced_fields = ("category", "location", "price", "details", "cta", "business_name",
-                           "phone", "website", "before_label", "after_label")
+                           "phone", "website")
         advanced_open = {"value": any(draft.get(key) and
                                        draft.get(key) != DEFAULT_PRESENTATION.get(key)
-                                       for key in advanced_fields) or
-                         bool(draft.get("compare_path"))}
+                                       for key in advanced_fields)}
         advanced_frame = ttk.LabelFrame(form, text="Προαιρετικές πληροφορίες", padding=4)
 
         def toggle_advanced():
@@ -290,8 +293,6 @@ class PresentationMixin:
         add_entry("Επωνυμία", "business_name", parent_frame=advanced_frame)
         add_entry("Τηλέφωνο", "phone", parent_frame=advanced_frame)
         add_entry("Ιστότοπος", "website", parent_frame=advanced_frame)
-        add_entry("Ετικέτα ΠΡΙΝ", "before_label", parent_frame=advanced_frame)
-        add_entry("Ετικέτα ΜΕΤΑ", "after_label", parent_frame=advanced_frame)
 
         ttk.Separator(form).pack(fill="x", padx=8, pady=6)
         template_row = ttk.Frame(form)
@@ -304,6 +305,37 @@ class PresentationMixin:
                      values=[INHERIT_TEMPLATE_LABEL, *TEMPLATES.values()]).pack(
             side="left", fill="x", expand=True)
         template_var.trace_add("write", schedule_preview)
+
+        featured_row = ttk.Frame(form)
+        featured_row.pack(fill="x", padx=8, pady=3)
+        featured_enabled_var = tk.BooleanVar(value=draft["featured_enabled"])
+        featured_check = ttk.Checkbutton(featured_row, text="Εμφάνιση Featured badge",
+                                         variable=featured_enabled_var)
+        featured_check.pack(side="left")
+        featured_text_var = tk.StringVar(value=draft["featured_text"])
+        ttk.Label(featured_row, text="Κείμενο badge:").pack(side="left", padx=(8, 3))
+        featured_entry = ttk.Entry(featured_row, textvariable=featured_text_var, width=20)
+        featured_entry.pack(side="left", fill="x", expand=True)
+        ttk.Label(form, text="Το badge χρησιμοποιείται στο Elegant Navy & Gold.",
+                  foreground="#666").pack(anchor="w", padx=8)
+
+        def selected_template_key():
+            if template_var.get() == INHERIT_TEMPLATE_LABEL:
+                return self.project_template
+            return next((key for key, label in TEMPLATES.items()
+                         if label == template_var.get()), "legacy")
+
+        def update_featured_controls(*_):
+            active = selected_template_key() == "navy_gold"
+            featured_check.config(state="normal" if active else "disabled")
+            featured_entry.config(state=("normal" if active and featured_enabled_var.get()
+                                         else "disabled"))
+
+        featured_enabled_var.trace_add("write", schedule_preview)
+        featured_enabled_var.trace_add("write", update_featured_controls)
+        featured_text_var.trace_add("write", schedule_preview)
+        template_var.trace_add("write", update_featured_controls)
+        update_featured_controls()
 
         preset_row = ttk.Frame(form)
         preset_row.pack(fill="x", padx=8, pady=3)
@@ -375,7 +407,7 @@ class PresentationMixin:
         ttk.Label(position_row, text="Θέση / panel", width=17).pack(side="left")
         position_var = tk.StringVar(value=next(
             (label for label, value in POSITION_LABELS.items() if value == draft["text_position"]),
-            "Αυτόματο template"))
+            "Κάτω"))
         ttk.Combobox(position_row, textvariable=position_var, state="readonly",
                      values=list(POSITION_LABELS), width=15).pack(side="left")
         position_var.trace_add("write", schedule_preview)
@@ -387,8 +419,18 @@ class PresentationMixin:
                      values=list(PANEL_STYLE_LABELS), width=15).pack(side="left", padx=8)
         panel_style_var.trace_add("write", schedule_preview)
         vars_by_key["panel_style"] = panel_style_var
-        ttk.Label(form, text="Στο Modern Lower Third, η θέση μετακινεί ολόκληρο το πλαίσιο.",
+        ttk.Label(form, text="Στο Navy & Gold Transparent, η θέση μετακινεί ολόκληρο το πλαίσιο.",
                   foreground="#666", wraplength=520).pack(anchor="w", padx=8, pady=(0, 4))
+
+        alignment_row = ttk.Frame(form)
+        alignment_row.pack(fill="x", padx=8, pady=3)
+        ttk.Label(alignment_row, text="Στοίχιση κειμένου", width=17).pack(side="left")
+        alignment_var = tk.StringVar(value=next(
+            (label for label, value in ALIGNMENT_LABELS.items()
+             if value == draft["text_align"]), "Αριστερά"))
+        ttk.Combobox(alignment_row, textvariable=alignment_var, state="readonly",
+                     values=list(ALIGNMENT_LABELS)).pack(side="left", fill="x", expand=True)
+        alignment_var.trace_add("write", schedule_preview)
 
         color_row = ttk.Frame(form)
         color_row.pack(fill="x", padx=8, pady=4)
@@ -424,24 +466,6 @@ class PresentationMixin:
         logo_var.trace_add("write", schedule_preview)
         ttk.Button(form, text="Επιλογή λογότυπου…", command=lambda: choose_logo()).pack(
             anchor="w", padx=8)
-
-        images = [(str(path), f"{i + 1}. {Path(path).name}")
-                  for i, (kind, path, _ed) in enumerate(self.media_files)
-                  if kind == "image" and i != idx]
-        compare_labels = ["— χωρίς σύγκριση —"] + [label for _path, label in images]
-        compare_by_label = {label: path for path, label in images}
-        current_compare_label = next((label for path, label in images
-                                      if path == draft["compare_path"]), compare_labels[0])
-        compare_var = tk.StringVar(value=current_compare_label)
-        compare_row = ttk.Frame(advanced_frame)
-        compare_row.pack(fill="x", padx=8, pady=4)
-        ttk.Label(compare_row, text="Φωτογραφία ΠΡΙΝ", width=17).pack(side="left")
-        ttk.Combobox(compare_row, textvariable=compare_var, state="readonly",
-                     values=compare_labels).pack(side="left", fill="x", expand=True)
-        compare_var.trace_add("write", schedule_preview)
-        ttk.Label(advanced_frame, text="Το template Before / After χρησιμοποιεί την επιλεγμένη φωτογραφία "
-                            "ως ΠΡΙΝ και το τρέχον media ως ΜΕΤΑ.", foreground="#666",
-                  wraplength=520).pack(anchor="w", padx=8, pady=(0, 5))
 
         # ---------------------------- preview and actions
         preview = ttk.LabelFrame(container, text="Προεπισκόπηση του slide")
@@ -505,7 +529,10 @@ class PresentationMixin:
             values["template"] = (INHERIT_TEMPLATE if template_var.get() == INHERIT_TEMPLATE_LABEL
                                    else next((k for k, v in TEMPLATES.items()
                                               if v == template_var.get()), "legacy"))
-            values["text_position"] = POSITION_LABELS.get(position_var.get(), "template")
+            values["text_position"] = POSITION_LABELS.get(position_var.get(), "bottom")
+            values["text_align"] = ALIGNMENT_LABELS.get(alignment_var.get(), "left")
+            values["featured_enabled"] = featured_enabled_var.get()
+            values["featured_text"] = featured_text_var.get()
             values["panel_style"] = PANEL_STYLE_LABELS.get(panel_style_var.get(), "solid")
             values["duration"] = (numeric(duration_var, self.settings.get("slide_duration", 3))
                                    if duration_enabled.get() else None)
@@ -521,10 +548,10 @@ class PresentationMixin:
             values["panel_color"] = color_vars["panel_color"].get()
             values["accent_color"] = color_vars["accent_color"].get()
             values["logo_enabled"] = logo_enabled.get()
-            values["compare_path"] = compare_by_label.get(compare_var.get(), "")
+            values["compare_path"] = ""
             return normalize_presentation(values, scene_id=original["scene_id"])
 
-        def display_preview(frame, overflow, missing_compare, token):
+        def display_preview(frame, overflow, token):
             if preview_state["closed"] or token != preview_state["token"]:
                 return
             try:
@@ -538,8 +565,6 @@ class PresentationMixin:
                 warnings = []
                 if overflow:
                     warnings.append("⚠ Το κείμενο υπερβαίνει τον ασφαλή χώρο· μείωσέ το ή διάλεξε άλλο template.")
-                if missing_compare:
-                    warnings.append("⚠ Διάλεξε φωτογραφία «ΠΡΙΝ» για το template Before / After.")
                 warning.config(text="\n".join(warnings))
                 preview_status.config(text="Προεπισκόπηση ενημερώθηκε")
             except tk.TclError:
@@ -561,8 +586,6 @@ class PresentationMixin:
 
             def worker():
                 try:
-                    missing_compare = (effective_values["template"] == "before_after" and
-                                       not Path(values.get("compare_path", "")).is_file())
                     if m_type == "image":
                         source = Image.open(path)
                     else:
@@ -576,23 +599,27 @@ class PresentationMixin:
                             frame = self._fit_image_logic(source, width, height, "image", text=text)
                             data = getattr(frame, "fit_move_data", None)
                             if data is not None:
-                                overlay = self._make_text_overlay(text, width, height)
+                                overlay = self._make_text_overlay(
+                                    text, width, height, align=effective_values["text_align"])
                                 frame = self._render_fit_and_move_frame(
                                     frame, data, 0.0, width, height, overlay)
                             else:
-                                frame = self.render_text_on_image(frame, text, width, height)
+                                frame = self.render_text_on_image(
+                                    frame, text, width, height,
+                                    align=effective_values["text_align"])
                         else:
                             frame = self._render_video_first_frame(source, width, height)
-                            frame = self.render_text_on_image(frame, text, width, height)
+                            frame = self.render_text_on_image(
+                                frame, text, width, height,
+                                align=effective_values["text_align"])
                         overflow = False
                     else:
                         fields = presentation_fields(values, raw_global)
-                        fallback = source if effective_values["template"] != "before_after" else None
-                        before = self._presentation_before_image(values, fallback=fallback)
+                        before = self._presentation_before_image(values, fallback=source)
                         frame, overflow = compose_design_frame(
                             source, width, height, effective_values, fields, before_image=before)
                     frame = self._apply_watermark_overlay(frame)
-                    self._post_ui(display_preview, frame, overflow, missing_compare, token)
+                    self._post_ui(display_preview, frame, overflow, token)
                 except Exception as exc:
                     error = str(exc)
                     self._post_ui(preview_status.config, text=f"Preview error: {error}")
@@ -606,11 +633,18 @@ class PresentationMixin:
                 else:
                     value = fresh.get(key, DEFAULT_PRESENTATION.get(key))
                 if key == "template":
-                    template_var.set(INHERIT_TEMPLATE_LABEL if value == INHERIT_TEMPLATE
-                                     else TEMPLATES[value])
+                    template_var.set(INHERIT_TEMPLATE_LABEL if value == INHERIT_TEMPLATE else
+                                     TEMPLATES[normalize_template(value)])
                 elif key == "text_position":
                     position_var.set(next((label for label, item in POSITION_LABELS.items()
-                                           if item == value), "Αυτόματο template"))
+                                           if item == value), "Κάτω"))
+                elif key == "text_align":
+                    alignment_var.set(next((label for label, item in ALIGNMENT_LABELS.items()
+                                            if item == value), "Αριστερά"))
+                elif key == "featured_enabled":
+                    featured_enabled_var.set(value)
+                elif key == "featured_text":
+                    featured_text_var.set(value)
                 elif key == "font_family":
                     font_var.set(value)
                 elif key == "font_size":
@@ -630,8 +664,6 @@ class PresentationMixin:
                     logo_enabled.set(False)
                 elif key == "logo_path":
                     logo_var.set("")
-                elif key == "compare_path":
-                    compare_var.set(compare_labels[0])
                 elif key == "transition":
                     transition_var.set("Παγκόσμια ρύθμιση")
                 elif key == "transition_duration":
@@ -667,16 +699,22 @@ class PresentationMixin:
             preset = all_presets.get(preset_var.get())
             if not isinstance(preset, dict):
                 return
+            preset = normalize_presentation(preset)
             for key in DESIGN_KEYS:
-                if key not in preset:
-                    continue
                 value = copy.deepcopy(preset[key])
                 if key == "template":
                     template_var.set(INHERIT_TEMPLATE_LABEL if value == INHERIT_TEMPLATE else
-                                     TEMPLATES.get(value, TEMPLATES["legacy"]))
+                                     TEMPLATES[normalize_template(value)])
                 elif key == "text_position":
                     position_var.set(next((label for label, item in POSITION_LABELS.items()
-                                           if item == value), "Αυτόματο template"))
+                                           if item == value), "Κάτω"))
+                elif key == "text_align":
+                    alignment_var.set(next((label for label, item in ALIGNMENT_LABELS.items()
+                                            if item == value), "Αριστερά"))
+                elif key == "featured_enabled":
+                    featured_enabled_var.set(bool(value))
+                elif key == "featured_text":
+                    featured_text_var.set(value or "")
                 elif key == "font_family":
                     font_var.set(value or self.settings.get("font_family", "Calibri"))
                 elif key == "font_size":
@@ -701,9 +739,6 @@ class PresentationMixin:
                     logo_enabled.set(bool(value))
                 elif key == "logo_path":
                     logo_var.set(value or "")
-                elif key == "compare_path":
-                    compare_var.set(next((label for path, label in images if path == value),
-                                         compare_labels[0]))
             schedule_preview()
 
         def apply_design_to(indices, status_text):
@@ -785,4 +820,5 @@ class PresentationMixin:
         schedule_preview()
         container.apply_presentation = apply_current
         container.refresh_presentation_preview = schedule_preview
+        container.refresh_featured_controls = update_featured_controls
         return container
