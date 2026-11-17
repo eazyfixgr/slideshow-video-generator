@@ -146,7 +146,7 @@ class CaptionsMixin:
         dialog.title("Captions — Video & Photos")
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         dialog.geometry(f"{min(1380, max(1000, int(sw * .92)))}x"
-                        f"{min(860, max(680, int(sh * .92)))}")
+                        f"{min(1100, max(620, int(sh * .96)))}")
         dialog.minsize(min(920, sw - 80), min(620, sh - 80))
         dialog.resizable(True, True)
         dialog.transient(self.root)
