@@ -700,14 +700,19 @@ class CaptionsMixin:
                     edit_override["presentation"] = presentation
             else:
                 index = selected_indices[0] if selected_indices else (media[0][0] if media else None)
-                edit_override = None
+                edit_override = copy.deepcopy(self.media_files[index][2]) if index is not None else None
+                if edit_override is not None:
+                    presentation = normalize_presentation(edit_override.get("presentation"))
+                    presentation["mode"] = "global"
+                    edit_override["presentation"] = presentation
             if index is None:
                 preview.delete("all")
                 preview_status.config(text="Δεν υπάρχουν media αυτού του τύπου.")
                 return
+            global_text = (shared_text.get("1.0", "end-1c") if state["mode"] == "shared"
+                           else self.get_text_for(media_type))
             self._schedule_caption_preview(dialog, preview, index, media_type,
-                                           self.get_text_for(media_type), preview_status,
-                                           edit_override)
+                                           global_text, preview_status, edit_override)
 
         def mode_changed(*_):
             new_mode = mode_labels.get(mode_var.get(), "shared")
@@ -718,12 +723,14 @@ class CaptionsMixin:
                 tree.configure(selectmode="browse")
                 caption_frame.grid_remove()
                 shared_frame.grid()
+                preview_box.config(text="Preview κοινού caption στο επιλεγμένο media")
                 apply_shared.config(text=("Εφαρμογή κοινού caption σε ΟΛΑ τα video" if media_type == "video"
                                           else "Εφαρμογή κοινού caption σε ΟΛΕΣ τις φωτογραφίες"))
                 apply_shared.state(["!disabled"])
             else:
                 shared_frame.grid_remove()
                 caption_frame.grid()
+                preview_box.config(text="Preview caption επιλεγμένου media")
                 tree.configure(selectmode="extended" if new_mode == "group" else "browse")
                 if new_mode == "individual":
                     selected_ids = list(tree.selection())
@@ -812,7 +819,8 @@ class CaptionsMixin:
         apply_caption.config(command=apply_caption_action)
         improve.config(command=lambda: self.improve_text_with_ai(
             shared_text.get("1.0", "end-1c"), instructions.get("1.0", "end-1c"),
-            apply_result=lambda value: (replace_text(shared_text, value), sync_shared_text()),
+            apply_result=lambda value: (self._replace_caption_text(shared_text, value),
+                                        sync_shared_text()),
             set_busy=lambda busy: (improve.config(state="disabled" if busy else "normal"),
                                    preview_status.config(text="AI γράφει..." if busy else ""))))
 
