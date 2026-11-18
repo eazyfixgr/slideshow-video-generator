@@ -157,6 +157,9 @@ class LibraryMixin:
             self._build_icons()
         self._refresh_selection()
         self._schedule_preview()
+        refresh_estimate = getattr(self, "_refresh_export_estimate", None)
+        if refresh_estimate:
+            refresh_estimate()
 
     def _media_duration(self, m_type, path):
         if m_type != "video":

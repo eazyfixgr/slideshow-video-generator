@@ -153,16 +153,60 @@ class LayoutMixin:
             quality_row, textvariable=self.export_quality_var, state="readonly",
             values=list(EXPORT_QUALITY_OPTIONS), width=27)
         quality_combo.pack(side="left")
-        ttk.Label(quality_row, text="Το Facebook preset στοχεύει έως 95 MB.",
+        self.export_estimate_var = tk.StringVar(value="Add media for estimate")
+        ttk.Label(quality_row, textvariable=self.export_estimate_var,
                   foreground="#666").pack(side="left", padx=8)
+
+        estimate_state = {"job": None, "token": 0}
+
+        def show_export_estimate(token, duration=None, size_mb=None, error=None):
+            if token != estimate_state["token"]:
+                return
+            if error:
+                self.export_estimate_var.set("Estimate unavailable")
+            else:
+                self.export_estimate_var.set(
+                    f"Approx. {size_mb:.1f} MB · Duration: "
+                    f"{self.format_estimated_duration(duration)}")
+
+        def calculate_export_estimate():
+            estimate_state["job"] = None
+            if not self.media_files:
+                self.export_estimate_var.set("Add media for estimate")
+                return
+            estimate_state["token"] += 1
+            token = estimate_state["token"]
+            self.export_estimate_var.set("Estimating export…")
+
+            def worker():
+                try:
+                    duration, size_mb = self.estimate_export_metrics()
+                    self._post_ui(show_export_estimate, token, duration, size_mb)
+                except Exception as exc:
+                    self._post_ui(show_export_estimate, token, error=exc)
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        def schedule_export_estimate(*_):
+            job = estimate_state.get("job")
+            if job is not None:
+                try:
+                    self.root.after_cancel(job)
+                except tk.TclError:
+                    pass
+            estimate_state["job"] = self.root.after(250, calculate_export_estimate)
+
+        self._refresh_export_estimate = schedule_export_estimate
 
         def save_export_quality(_event=None):
             value = EXPORT_QUALITY_OPTIONS.get(self.export_quality_var.get(), "high")
             if self.settings.get("export_quality") != value:
                 self.settings["export_quality"] = value
                 self.save_settings()
+            schedule_export_estimate()
 
         quality_combo.bind("<<ComboboxSelected>>", save_export_quality, add="+")
+        schedule_export_estimate()
 
         self.progress_var = tk.DoubleVar(value=0)
         ttk.Progressbar(controls, variable=self.progress_var, maximum=100).pack(fill='x', pady=(4, 0))

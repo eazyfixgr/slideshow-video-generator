@@ -135,6 +135,38 @@ class PresentationModelTests(unittest.TestCase):
         self.assertIn("-maxrate", options)
         self.assertNotIn("-crf", options)
 
+    def test_export_size_estimate_tracks_quality_and_duration(self):
+        def estimator(quality, duration=60):
+            app = object.__new__(ExportMixin)
+            app.settings = {
+                "slide_duration": duration,
+                "resolution": "1920x1080",
+                "export_quality": quality,
+                "facebook_target_mb": 25,
+            }
+            app.media_files = [("image", "slide.png", {})]
+            app._presentation_for = lambda edit: normalize_presentation(
+                edit.get("presentation"))
+            return app
+
+        high_duration, high_size = estimator("high").estimate_export_metrics()
+        balanced_duration, balanced_size = estimator("balanced").estimate_export_metrics()
+        compact_duration, compact_size = estimator("compact").estimate_export_metrics()
+        facebook_duration, facebook_size = estimator("facebook").estimate_export_metrics()
+
+        self.assertEqual(high_duration, 60)
+        self.assertEqual(balanced_duration, 60)
+        self.assertEqual(compact_duration, 60)
+        self.assertEqual(facebook_duration, 60)
+        self.assertGreater(high_size, balanced_size)
+        self.assertGreater(balanced_size, compact_size)
+        self.assertAlmostEqual(facebook_size, 25, delta=0.1)
+        self.assertEqual(ExportMixin.format_estimated_duration(65), "01:05")
+
+        two_slides = estimator("high", duration=3)
+        two_slides.media_files *= 2
+        self.assertAlmostEqual(two_slides.estimate_export_duration(), 5.3)
+
     def test_named_design_templates_migrate_old_presets(self):
         settings = {"slide_design_presets": {
             "My Navy": {"template": "real_estate", "featured_text": "FOR SALE",
