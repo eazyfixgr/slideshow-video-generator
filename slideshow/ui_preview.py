@@ -130,7 +130,8 @@ class PreviewMixin:
             del canvas.full_image
 
 
-    def _render_preview(self, path, m_type, w, h, canvas, edit=None, t_start=0.0):
+    def _render_preview(self, path, m_type, w, h, canvas, edit=None, t_start=0.0,
+                        display_token=None):
         """Render the first frame of the export for this media type (full
         resolution), then downscale only for display. For fit_and_move the
         export picks a random pan direction, so this shows the pan start -
@@ -175,7 +176,10 @@ class PreviewMixin:
         # Pass the PIL image through after(); PhotoImage must be built in the
         # main thread, not in this worker thread. The display size is chosen
         # later from the canvas' real size, so it follows window resizing.
-        self._post_ui(self._show_preview, canvas, full)
+        if display_token is None:
+            self._post_ui(self._show_preview, canvas, full)
+        else:
+            self._post_ui(self._show_live_render_preview, display_token, canvas, full)
 
 
     def _show_preview(self, canvas, full):

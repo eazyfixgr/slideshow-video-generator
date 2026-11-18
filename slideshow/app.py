@@ -285,6 +285,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             "output_folder": str(self.app_dir), "slide_duration": 3,
             "export_quality": "high", "facebook_target_mb": 95,
             "last_caption_template": "legacy",
+            "render_live_preview": False,
             "music_folder": str(self.app_dir / "music"), "crossfade_duration": 3, "trim_silence": True,
             "transition_effect": "fade", "transition_duration": 0.7, "random_transitions": [],
             "watermark_enabled": False, "watermark_path": "", "watermark_position": "bottom_right",

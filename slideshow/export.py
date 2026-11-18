@@ -23,9 +23,10 @@ from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhan
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
 from .slide_design import render_design_layers
 from .export_quality import ExportQualityMixin
+from .export_live_preview import ExportLivePreviewMixin
 
 
-class ExportMixin(ExportQualityMixin):
+class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
     """The whole ffmpeg export pipeline: clips, transitions, watermark, music."""
 
     def export_video(self):
@@ -43,8 +44,15 @@ class ExportMixin(ExportQualityMixin):
             out_folder = self.out_var.get().strip()
         out = Path(out_folder) / f"{n}.mp4"
         self._export_cancel = False
+        live_preview_var = getattr(self, "render_live_preview_var", None)
+        self._live_render_previews_enabled = (bool(live_preview_var.get())
+                                              if live_preview_var is not None else False)
+        self.progress_var.set(0)
+        self._start_export_eta()
         if getattr(self, "cancel_btn", None) is not None:
             self.cancel_btn.config(state='normal')
+        if getattr(self, "render_live_preview_check", None) is not None:
+            self.render_live_preview_check.config(state="disabled")
         self.status.config(text="Exporting...")
         threading.Thread(target=self._export_task, args=(out,), daemon=True).start()
 
@@ -91,6 +99,7 @@ class ExportMixin(ExportQualityMixin):
 
 
     def _export_task(self, out_path):
+        completed = False
         try:
             temp_dir = self.app_dir / "temp"
             temp_dir.mkdir(exist_ok=True)
@@ -159,10 +168,12 @@ class ExportMixin(ExportQualityMixin):
                                 if overflow:
                                     self._log_export(
                                         f"item {i}: design text exceeds the template safe area")
-                                clip_dur = self._render_fit_and_move_clip(
-                                    base, fit_move_data, temp_dir, i, width, height,
-                                    item_duration, clip_path,
-                                    design_layers=(base, overlay, rect))
+                                clip_dur = self._with_live_render_preview(
+                                    lambda: self._render_fit_and_move_clip(
+                                        base, fit_move_data, temp_dir, i, width, height,
+                                        item_duration, clip_path,
+                                        design_layers=(base, overlay, rect)),
+                                    "image", path, edit)
                             else:
                                 img, overflow = self._render_design_frame(
                                     img, edit, "image", width, height)
@@ -172,8 +183,9 @@ class ExportMixin(ExportQualityMixin):
                                        '-t', str(item_duration), '-c:v', 'libx264',
                                        *self.video_encode_options(), '-r', '30',
                                        '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
-                                self._run_ffmpeg_or_raise(
-                                    cmd, f"encoding designed image clip {i}")
+                                self._run_media_clip_with_live_preview(
+                                    cmd, f"encoding designed image clip {i}",
+                                    "image", path, edit)
                                 clip_dur = float(item_duration)
                         else:
                             img, overflow = self._render_design_frame(
@@ -187,7 +199,9 @@ class ExportMixin(ExportQualityMixin):
                                    '-t', str(item_duration), '-c:v', 'libx264',
                                    *self.video_encode_options(), '-r', '30',
                                    '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
-                            self._run_ffmpeg_or_raise(cmd, f"encoding designed image clip {i}")
+                            self._run_media_clip_with_live_preview(
+                                cmd, f"encoding designed image clip {i}",
+                                "image", path, edit, frame=img)
                             clip_dur = float(item_duration)
                     else:
                         img = self._fit_image_logic(img, width, height, m_type, text=text)
@@ -201,13 +215,16 @@ class ExportMixin(ExportQualityMixin):
                                    '-t', str(item_duration), '-c:v', 'libx264',
                                    *self.video_encode_options(), '-r', '30',
                                    '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
-                            self._run_ffmpeg_or_raise(cmd, f"encoding image clip {i}")
+                            self._run_media_clip_with_live_preview(
+                                cmd, f"encoding image clip {i}", "image", path, edit, frame=img)
                             clip_dur = float(item_duration)
                         else:
-                            clip_dur = self._render_fit_and_move_clip(
-                                img, fit_move_data, temp_dir, i, width, height,
-                                item_duration, clip_path,
-                                text_align=presentation["text_align"])
+                            clip_dur = self._with_live_render_preview(
+                                lambda: self._render_fit_and_move_clip(
+                                    img, fit_move_data, temp_dir, i, width, height,
+                                    item_duration, clip_path,
+                                    text_align=presentation["text_align"]),
+                                "image", path, edit)
                 else:
                     # Duration via ffprobe. MoviePy's VideoFileClip reads a full
                     # frame just to open the clip and can fail on files ffmpeg
@@ -338,7 +355,8 @@ class ExportMixin(ExportQualityMixin):
                                  '-c:v', 'libx264', *self.video_encode_options(),
                                  '-r', '30', '-pix_fmt', 'yuv420p', '-t', str(dur),
                                 '-an', str(clip_path)])
-                    self._run_ffmpeg_or_raise(cmd, f"encoding video clip {i}")
+                    self._run_media_clip_with_live_preview(
+                        cmd, f"encoding video clip {i}", "video", path, edit, segments=segs)
                     clip_dur = float(dur)
 
                     # The first frame of a video clip renders only the blurred background.
@@ -424,6 +442,7 @@ class ExportMixin(ExportQualityMixin):
                     Path(out_path).is_file() and Path(out_path).stat().st_size > 100_000_000):
                 note += ("\n\nΠροσοχή: το αρχείο ξεπέρασε τα 100 MB. Διάλεξε «Μικρότερο αρχείο» "
                          "ή χαμήλωσε κι άλλο την ποιότητα.")
+            completed = True
             self._post_ui(messagebox.showinfo, "Done", "Export Complete!" + note)
         except Exception as e:
             self._log_export(f"EXPORT ERROR: {e}")
@@ -437,11 +456,15 @@ class ExportMixin(ExportQualityMixin):
                 err_msg = str(e)
                 self._post_ui(messagebox.showerror, "Error", err_msg)
         finally:
+            cancelled = self._export_cancel
             self._export_cancel = False
             self._export_proc = None
             if getattr(self, "cancel_btn", None) is not None:
                 self._post_ui(lambda: self.cancel_btn.config(state='disabled'))
+            if getattr(self, "render_live_preview_check", None) is not None:
+                self._post_ui(lambda: self.render_live_preview_check.config(state="normal"))
             self._post_ui(lambda: self.status.config(text="Ready"))
+            self._post_ui(self._finish_export_eta, completed, cancelled)
 
 
     def _log_export(self, msg):

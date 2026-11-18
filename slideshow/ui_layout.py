@@ -7,6 +7,7 @@ import random
 import re
 import subprocess
 import threading
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +73,87 @@ class LayoutMixin:
             self._schedule_preview()
         if getattr(self, "current_project", None) or self.name_var.get().strip():
             self.is_modified = True
+
+
+    def _start_export_eta(self):
+        job = getattr(self, "_export_eta_job", None)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except tk.TclError:
+                pass
+        now = time.monotonic()
+        self._export_eta_active = True
+        self._export_eta_state = {
+            "last_progress": float(self.progress_var.get()),
+            "last_change": now,
+            "seconds_per_percent": None,
+        }
+        self.export_eta_var.set("Estimating remaining time…")
+        self._update_export_eta()
+
+
+    def _on_export_progress(self, *_):
+        if not getattr(self, "_export_eta_active", False):
+            return
+        try:
+            progress = float(self.progress_var.get())
+        except (tk.TclError, ValueError, TypeError):
+            return
+        state = self._export_eta_state
+        previous = state["last_progress"]
+        if progress <= previous:
+            return
+        now = time.monotonic()
+        elapsed = now - state["last_change"]
+        delta = progress - previous
+        if elapsed > 0:
+            sample = elapsed / delta
+            old_rate = state["seconds_per_percent"]
+            state["seconds_per_percent"] = (sample if old_rate is None else
+                                             old_rate * 0.65 + sample * 0.35)
+        state["last_progress"] = progress
+        state["last_change"] = now
+
+
+    def _update_export_eta(self):
+        self._export_eta_job = None
+        if not getattr(self, "_export_eta_active", False):
+            return
+        try:
+            progress = max(0.0, min(100.0, float(self.progress_var.get())))
+        except (tk.TclError, ValueError, TypeError):
+            progress = 0.0
+        state = self._export_eta_state
+        seconds_per_percent = state["seconds_per_percent"]
+        if progress >= 99.5:
+            text = "Finishing export…"
+        elif seconds_per_percent is None:
+            text = "Estimating remaining time…"
+        else:
+            elapsed_since_update = time.monotonic() - state["last_change"]
+            remaining = seconds_per_percent * (100.0 - progress) - elapsed_since_update
+            text = (f"Remaining: {self.format_estimated_duration(remaining)}"
+                    if remaining > 1 else "Re-estimating…")
+        self.export_eta_var.set(text)
+        self._export_eta_job = self.root.after(1000, self._update_export_eta)
+
+
+    def _finish_export_eta(self, completed=False, cancelled=False):
+        self._export_eta_active = False
+        job = getattr(self, "_export_eta_job", None)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except tk.TclError:
+                pass
+        self._export_eta_job = None
+        if completed:
+            self.export_eta_var.set("Export complete")
+        elif cancelled:
+            self.export_eta_var.set("Export cancelled")
+        else:
+            self.export_eta_var.set("Export stopped")
 
 
     def setup_gui(self):
@@ -209,7 +291,25 @@ class LayoutMixin:
         schedule_export_estimate()
 
         self.progress_var = tk.DoubleVar(value=0)
-        ttk.Progressbar(controls, variable=self.progress_var, maximum=100).pack(fill='x', pady=(4, 0))
+        self.progress_var.trace_add("write", self._on_export_progress)
+        progress_row = ttk.Frame(controls)
+        progress_row.pack(fill="x", pady=(4, 0))
+        ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100).pack(
+            side="left", fill="x", expand=True)
+        self.export_eta_var = tk.StringVar(value="Remaining: —")
+        ttk.Label(progress_row, textvariable=self.export_eta_var).pack(side="right", padx=(8, 0))
+
+        self.render_live_preview_var = tk.BooleanVar(
+            value=bool(self.settings.get("render_live_preview", False)))
+
+        def save_live_preview_setting():
+            self.settings["render_live_preview"] = bool(self.render_live_preview_var.get())
+            self.save_settings()
+
+        self.render_live_preview_check = ttk.Checkbutton(
+            controls, text="Live preview during render (1 frame/sec)",
+            variable=self.render_live_preview_var, command=save_live_preview_setting)
+        self.render_live_preview_check.pack(anchor="w", pady=(2, 0))
 
         # Preview fills the rest of the panel, above the controls.
         ttk.Label(right, text="Preview (πρώτο καρέ / επιλεγμένο slide)",
