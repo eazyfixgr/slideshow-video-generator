@@ -106,6 +106,19 @@ class PresentationModelTests(unittest.TestCase):
         self.assertIn("eq=saturation=1.0619,scale=1080:1068", chain)
         self.assertNotIn("saturation=1.0619scale", chain)
 
+    def test_facebook_quality_allocates_less_bitrate_to_longer_projects(self):
+        short = ExportMixin.facebook_video_bitrate(95, 120)
+        long = ExportMixin.facebook_video_bitrate(95, 480)
+        self.assertGreater(short, long)
+        self.assertGreaterEqual(long, 64_000)
+        self.assertLess(long, 2_000_000)
+        exporter = object.__new__(ExportMixin)
+        exporter.settings = {"export_quality": "facebook"}
+        exporter._export_video_bitrate = long
+        options = exporter.video_encode_options()
+        self.assertIn("-maxrate", options)
+        self.assertNotIn("-crf", options)
+
     def test_project_template_is_inherited_unless_slide_overrides_it(self):
         class ProjectRenderer(RenderMixin):
             project_template = "navy_gold"

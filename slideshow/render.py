@@ -303,7 +303,8 @@ class RenderMixin:
 
 
     def _render_fit_and_move_clip(self, bg, fit_move_data, temp_dir, index, width, height,
-                                  image_duration, clip_path, text_align="left"):
+                                  image_duration, clip_path, text_align="left",
+                                  design_layers=None):
         """Render a slow pan clip for the 'Fit and Move' background mode.
 
         The foreground image was already zoomed in ``_fit_image_logic`` so it
@@ -320,15 +321,23 @@ class RenderMixin:
         fps = 30
         total_frames = max(1, int(image_duration * fps))
         forward = random.choice([True, False])
-        overlay = self._make_text_overlay(self.get_text_for("image"), width, height,
-                                          align=text_align)
+        if design_layers is None:
+            overlay = self._make_text_overlay(self.get_text_for("image"), width, height,
+                                              align=text_align)
+            design_pan_background = None
+            base = fixed_overlay = rect = None
+        else:
+            base, fixed_overlay, rect = design_layers
+            _x, _y, rect_width, rect_height = rect
+            design_pan_background = Image.new("RGB", (rect_width, rect_height))
+            overlay = None
         self._log_export(f"fit_and_move img {index}: is_landscape={is_landscape} "
                          f"available_h={available_h} fg={fg.size} frames={total_frames} "
                          f"direction={'L->R' if forward else 'R->L'}")
 
         cmd = ['ffmpeg', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
                '-s', f'{width}x{height}', '-r', str(fps), '-i', '-',
-               '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
+               '-c:v', 'libx264', *self.video_encode_options('veryfast'),
                '-r', str(fps), '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -338,7 +347,17 @@ class RenderMixin:
                     raise RuntimeError("cancelled")
                 t = f_idx / (total_frames - 1) if total_frames > 1 else 0.0
                 pos = t if forward else (1.0 - t)
-                frame = self._render_fit_and_move_frame(bg, fit_move_data, pos, width, height, overlay)
+                if design_layers is None:
+                    frame = self._render_fit_and_move_frame(
+                        bg, fit_move_data, pos, width, height, overlay)
+                else:
+                    x, y, rw, rh = rect
+                    moving = self._render_fit_and_move_frame(
+                        design_pan_background, fit_move_data, pos, rw, rh)
+                    frame = base.copy()
+                    frame.paste(moving, (x, y))
+                    frame = Image.alpha_composite(
+                        frame.convert("RGBA"), fixed_overlay).convert("RGB")
                 # Always feed exact 3-bytes-per-pixel RGB: PNG-with-alpha sources
                 # would otherwise produce RGBA bytes that ffmpeg misreads.
                 proc.stdin.write(frame.convert("RGB").tobytes())

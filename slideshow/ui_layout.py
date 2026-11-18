@@ -18,6 +18,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhance,
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
+from .export_quality import EXPORT_QUALITY_OPTIONS
 
 
 class LayoutMixin:
@@ -100,6 +101,28 @@ class LayoutMixin:
                    style='Accent.TButton').pack(side='left', padx=2)
         self.cancel_btn = ttk.Button(r2, text="Cancel Export", command=self.cancel_export, state='disabled')
         self.cancel_btn.pack(side='left', padx=2)
+
+        quality_row = ttk.Frame(controls)
+        quality_row.pack(fill='x', pady=(0, 4))
+        ttk.Label(quality_row, text="Export quality:").pack(side="left", padx=(0, 6))
+        quality_mode = self.settings.get("export_quality", "high")
+        quality_label = next((label for label, mode in EXPORT_QUALITY_OPTIONS.items()
+                              if mode == quality_mode), "Υψηλή")
+        self.export_quality_var = tk.StringVar(value=quality_label)
+        quality_combo = ttk.Combobox(
+            quality_row, textvariable=self.export_quality_var, state="readonly",
+            values=list(EXPORT_QUALITY_OPTIONS), width=27)
+        quality_combo.pack(side="left")
+        ttk.Label(quality_row, text="Το Facebook preset στοχεύει έως 95 MB.",
+                  foreground="#666").pack(side="left", padx=8)
+
+        def save_export_quality(_event=None):
+            value = EXPORT_QUALITY_OPTIONS.get(self.export_quality_var.get(), "high")
+            if self.settings.get("export_quality") != value:
+                self.settings["export_quality"] = value
+                self.save_settings()
+
+        quality_combo.bind("<<ComboboxSelected>>", save_export_quality, add="+")
 
         self.progress_var = tk.DoubleVar(value=0)
         ttk.Progressbar(controls, variable=self.progress_var, maximum=100).pack(fill='x', pady=(4, 0))

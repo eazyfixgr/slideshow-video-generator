@@ -21,9 +21,10 @@ from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhan
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
 from .slide_design import render_design_layers
+from .export_quality import ExportQualityMixin
 
 
-class ExportMixin:
+class ExportMixin(ExportQualityMixin):
     """The whole ffmpeg export pipeline: clips, transitions, watermark, music."""
 
     def export_video(self):
@@ -100,6 +101,12 @@ class ExportMixin:
             width, height = map(int, res.split('x'))
             image_duration = self.settings.get("slide_duration", 3)
             cpu_count = os.cpu_count() or 8
+            self._export_video_bitrate = None
+            if self.settings.get("export_quality", "high") == "facebook":
+                duration_estimate = self.estimate_export_duration()
+                target_mb = self.settings.get("facebook_target_mb", 95)
+                self._export_video_bitrate = self.facebook_video_bitrate(
+                    target_mb, duration_estimate)
 
             # Fresh debug log for this export run
             try:
@@ -110,6 +117,10 @@ class ExportMixin:
                              f"bg={self.settings.get('background_mode')}, "
                              f"slide_dur={image_duration}s, "
                              f"music_folder={self.settings.get('music_folder')}")
+            if self.settings.get("export_quality", "high") == "facebook":
+                self._log_export(
+                    f"quality: Facebook target {target_mb} MB, estimated duration "
+                    f"{duration_estimate:.1f}s, video bitrate {self._export_video_bitrate} bps")
             self._export_music_missing = False
             self._export_voice_used = False
 
@@ -134,18 +145,49 @@ class ExportMixin:
                     text = self._presentation_text(presentation, "image")
                     item_duration = presentation["duration"] or image_duration
                     if presentation["template"] != "legacy":
-                        img, overflow = self._render_design_frame(
-                            img, edit, "image", width, height)
-                        if overflow:
-                            self._log_export(f"item {i}: design text exceeds the template safe area")
-                        png_path = temp_dir / f"frame_{i:04d}.png"
-                        img.save(str(png_path), "PNG")
-                        cmd = ['ffmpeg', '-y', '-loop', '1', '-i', str(png_path),
-                               '-t', str(item_duration), '-c:v', 'libx264',
-                               '-preset', 'fast', '-crf', '18', '-r', '30',
-                               '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
-                        self._run_ffmpeg_or_raise(cmd, f"encoding designed image clip {i}")
-                        clip_dur = float(item_duration)
+                        if self.settings.get("background_mode") == "fit_and_move":
+                            fields = self._presentation_fields(presentation, "image")
+                            before = self._presentation_before_image(presentation, fallback=img)
+                            base, overlay, rect, overflow = render_design_layers(
+                                width, height, presentation, fields, before_image=before)
+                            x, y, rw, rh = rect
+                            image_region = self._fit_image_logic(
+                                img, rw, rh, "image", text="")
+                            fit_move_data = getattr(image_region, "fit_move_data", None)
+                            if fit_move_data is not None:
+                                if overflow:
+                                    self._log_export(
+                                        f"item {i}: design text exceeds the template safe area")
+                                clip_dur = self._render_fit_and_move_clip(
+                                    base, fit_move_data, temp_dir, i, width, height,
+                                    item_duration, clip_path,
+                                    design_layers=(base, overlay, rect))
+                            else:
+                                img, overflow = self._render_design_frame(
+                                    img, edit, "image", width, height)
+                                png_path = temp_dir / f"frame_{i:04d}.png"
+                                img.save(str(png_path), "PNG")
+                                cmd = ['ffmpeg', '-y', '-loop', '1', '-i', str(png_path),
+                                       '-t', str(item_duration), '-c:v', 'libx264',
+                                       *self.video_encode_options(), '-r', '30',
+                                       '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
+                                self._run_ffmpeg_or_raise(
+                                    cmd, f"encoding designed image clip {i}")
+                                clip_dur = float(item_duration)
+                        else:
+                            img, overflow = self._render_design_frame(
+                                img, edit, "image", width, height)
+                            if overflow:
+                                self._log_export(
+                                    f"item {i}: design text exceeds the template safe area")
+                            png_path = temp_dir / f"frame_{i:04d}.png"
+                            img.save(str(png_path), "PNG")
+                            cmd = ['ffmpeg', '-y', '-loop', '1', '-i', str(png_path),
+                                   '-t', str(item_duration), '-c:v', 'libx264',
+                                   *self.video_encode_options(), '-r', '30',
+                                   '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
+                            self._run_ffmpeg_or_raise(cmd, f"encoding designed image clip {i}")
+                            clip_dur = float(item_duration)
                     else:
                         img = self._fit_image_logic(img, width, height, m_type, text=text)
                         fit_move_data = getattr(img, 'fit_move_data', None)
@@ -156,7 +198,7 @@ class ExportMixin:
                             img.save(str(png_path), "PNG")
                             cmd = ['ffmpeg', '-y', '-loop', '1', '-i', str(png_path),
                                    '-t', str(item_duration), '-c:v', 'libx264',
-                                   '-preset', 'fast', '-crf', '18', '-r', '30',
+                                   *self.video_encode_options(), '-r', '30',
                                    '-pix_fmt', 'yuv420p', '-an', str(clip_path)]
                             self._run_ffmpeg_or_raise(cmd, f"encoding image clip {i}")
                             clip_dur = float(item_duration)
@@ -229,11 +271,11 @@ class ExportMixin:
                                ['-loop', '1', '-i', str(bg_p),
                                 '-loop', '1', '-i', str(txt_p),
                                 '-filter_complex',
-                                f'{trim_prefix}{vf}[v];'
-                                f'[1:v][v]overlay={x}:{y}:shortest=1[base];'
-                                f'[base][2:v]overlay=0:0:shortest=1,format=yuv420p',
-                                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-                                '-r', '30', '-pix_fmt', 'yuv420p', '-t', str(dur),
+                                 f'{trim_prefix}{vf}[v];'
+                                 f'[1:v][v]overlay={x}:{y}:shortest=1[base];'
+                                 f'[base][2:v]overlay=0:0:shortest=1,format=yuv420p',
+                                 '-c:v', 'libx264', *self.video_encode_options(),
+                                 '-r', '30', '-pix_fmt', 'yuv420p', '-t', str(dur),
                                 '-an', str(clip_path)])
                     else:
                         text = self._presentation_text(presentation, "video")
@@ -260,10 +302,10 @@ class ExportMixin:
                                ['-loop', '1', '-i', str(bg_p),
                                 '-loop', '1', '-i', str(txt_p),
                                 '-filter_complex',
-                                f'{trim_prefix}{vf},format=yuv420p[v];'
-                                f'[1:v][v]overlay=(W-w)/2:(H-h)/2[base];[base][2:v]overlay=0:0',
-                                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
-                                '-r', '30', '-pix_fmt', 'yuv420p', '-t', str(dur),
+                                 f'{trim_prefix}{vf},format=yuv420p[v];'
+                                 f'[1:v][v]overlay=(W-w)/2:(H-h)/2[base];[base][2:v]overlay=0:0',
+                                 '-c:v', 'libx264', *self.video_encode_options(),
+                                 '-r', '30', '-pix_fmt', 'yuv420p', '-t', str(dur),
                                 '-an', str(clip_path)])
                     self._run_ffmpeg_or_raise(cmd, f"encoding video clip {i}")
                     clip_dur = float(dur)
@@ -274,7 +316,7 @@ class ExportMixin:
                         trimmed_path = temp_dir / f"clip_{i:04d}_t.mp4"
                         r = subprocess.run(['ffmpeg', '-y', '-i', str(clip_path),
                                             '-vf', "select='gte(n,1)',setpts=PTS-STARTPTS",
-                                            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                                            '-c:v', 'libx264', *self.video_encode_options(),
                                             '-r', '30', '-pix_fmt', 'yuv420p', '-an',
                                             str(trimmed_path)], capture_output=True)
                         if r.returncode == 0 and trimmed_path.exists():
@@ -347,6 +389,10 @@ class ExportMixin:
                     note = "\n\nΣημείωση: δεν βρέθηκε μουσική, το βίντεο είναι χωρίς ήχο."
             else:
                 note = ""
+            if (self.settings.get("export_quality") == "facebook" and
+                    Path(out_path).is_file() and Path(out_path).stat().st_size > 100_000_000):
+                note += ("\n\nΠροσοχή: το αρχείο ξεπέρασε τα 100 MB. Διάλεξε «Μικρότερο αρχείο» "
+                         "ή χαμήλωσε κι άλλο την ποιότητα.")
             self._post_ui(messagebox.showinfo, "Done", "Export Complete!" + note)
         except Exception as e:
             self._log_export(f"EXPORT ERROR: {e}")
@@ -770,7 +816,7 @@ class ExportMixin:
         self._last_effective_transitions = effective
         cmd = (['ffmpeg', '-y'] + inputs +
                ['-filter_complex', ";".join(filter_parts), '-map', previous,
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                '-c:v', 'libx264', *self.video_encode_options(),
                 '-r', '30', '-pix_fmt', 'yuv420p', '-an', str(merged)])
         self._run_ffmpeg_or_raise(cmd, "merging clips with transitions")
 
@@ -848,7 +894,7 @@ class ExportMixin:
 
         cmd = (['ffmpeg', '-y'] + inputs +
                ['-filter_complex', ";".join(fc), '-map', base,
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                '-c:v', 'libx264', *self.video_encode_options(),
                 '-pix_fmt', 'yuv420p', '-an', str(output_path)])
         self._run_ffmpeg_or_raise(cmd, "applying watermark")
 
