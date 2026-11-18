@@ -486,6 +486,7 @@ class WelcomeMixin:
             self.out_var.set(folder)
             self.project_template = next(
                 (key for key, label in TEMPLATES.items() if label == template_var.get()), "legacy")
+            self._remember_caption_template(self.project_template)
             self.settings.update({
                 "output_folder": folder,
                 "resolution": resolution_var.get(),

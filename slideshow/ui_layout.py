@@ -19,6 +19,7 @@ from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhan
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
 from .export_quality import EXPORT_QUALITY_OPTIONS
+from .slide_design import TEMPLATES, normalize_template
 
 
 class LayoutMixin:
@@ -32,6 +33,45 @@ class LayoutMixin:
         ttk.Separator(bar, orient='vertical').pack(side='left', fill='y', padx=6)
         ttk.Button(bar, text="Captions",
                    command=self.open_text_captions_manager).pack(side='left', padx=2)
+        ttk.Label(bar, text="Template:").pack(side="left", padx=(8, 3))
+        self._caption_template_var = tk.StringVar(
+            value=TEMPLATES.get(self.project_template, TEMPLATES["legacy"]))
+        template_combo = ttk.Combobox(
+            bar, textvariable=self._caption_template_var, state="readonly",
+            values=list(TEMPLATES.values()), width=27)
+        template_combo.pack(side="left", padx=(0, 4))
+        template_combo.bind("<<ComboboxSelected>>", self._on_caption_template_selected, add="+")
+
+
+    def _sync_caption_template_dropdown(self):
+        template_var = getattr(self, "_caption_template_var", None)
+        if template_var is not None:
+            template = normalize_template(getattr(self, "project_template", "legacy"))
+            self.project_template = template
+            template_var.set(TEMPLATES.get(template, TEMPLATES["legacy"]))
+
+
+    def _remember_caption_template(self, template):
+        template = normalize_template(template)
+        self.settings["last_caption_template"] = template
+        self._sync_caption_template_dropdown()
+        self.save_settings()
+        return template
+
+
+    def _on_caption_template_selected(self, _event=None):
+        selected = self._caption_template_var.get()
+        template = next((key for key, label in TEMPLATES.items()
+                         if label == selected), "legacy")
+        changed = template != self.project_template
+        self.project_template = self._remember_caption_template(template)
+        if not changed:
+            return
+        if self.media_files:
+            self.update_media_display()
+            self._schedule_preview()
+        if getattr(self, "current_project", None) or self.name_var.get().strip():
+            self.is_modified = True
 
 
     def setup_gui(self):

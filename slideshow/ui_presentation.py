@@ -106,6 +106,7 @@ class PresentationMixin:
             if template == self.project_template:
                 return
             self.project_template = template
+            self._remember_caption_template(template)
             self.is_modified = True
             refresh_items()
             self.update_media_display()

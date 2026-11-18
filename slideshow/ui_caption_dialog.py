@@ -246,6 +246,7 @@ class CaptionsMixin(MediaCaptionMixin):
                              if label == project_template_var.get()), "legacy")
             changed = template != self.project_template
             self.project_template = template
+            self._remember_caption_template(template)
             style_fields = ("text_position", "text_align", "font_family", "font_size",
                             "text_color", "panel_color", "accent_color", "panel_style",
                             "featured_enabled", "featured_text")

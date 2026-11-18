@@ -115,6 +115,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         }
 
         self.load_settings()
+        self.project_template = normalize_template(
+            self.settings.get("last_caption_template", self.project_template))
         self._global_settings = copy.deepcopy(self.settings)
         self.apply_ui_theme()
         self.view_mode.set(self.settings.get("view_mode", "thumbnails"))
@@ -274,6 +276,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             "auto_position_videos": False, "mute_video_audio": True,
             "output_folder": str(self.app_dir), "slide_duration": 3,
             "export_quality": "high", "facebook_target_mb": 95,
+            "last_caption_template": "legacy",
             "music_folder": str(self.app_dir / "music"), "crossfade_duration": 3, "trim_silence": True,
             "transition_effect": "fade", "transition_duration": 0.7, "random_transitions": [],
             "watermark_enabled": False, "watermark_path": "", "watermark_position": "bottom_right",
@@ -467,7 +470,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         self.name_var.set("")
         self.out_var.set(self.settings.get("output_folder", ""))
         self.media_files = []
-        self.project_template = "legacy"
+        self.project_template = normalize_template(
+            self.settings.get("last_caption_template", "legacy"))
+        self._sync_caption_template_dropdown()
         self.project_caption_mode = "all"
         self.project_text_all = ""
         self.project_text_videos = ""
@@ -728,6 +733,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         had_project_template = "project_template" in data
         project_template = data.get("project_template", "legacy")
         self.project_template = normalize_template(project_template)
+        self._sync_caption_template_dropdown()
         self.project_settings = self._normalize_project_settings(
             data.get("project_settings", {}))
         self._active_project_settings = bool(self.project_settings)
