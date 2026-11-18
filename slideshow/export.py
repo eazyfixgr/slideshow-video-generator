@@ -1,5 +1,6 @@
 """The whole ffmpeg export pipeline: clips, transitions, watermark, music."""
 
+import copy
 import io
 import json
 import os
@@ -249,10 +250,17 @@ class ExportMixin(ExportQualityMixin):
                     bg_p = temp_dir / f"bg_{i:04d}.png"
                     first_f = self._apply_image_edit(self._video_first_frame(path), edit, m_type="video")
                     if presentation["template"] != "legacy":
+                        auto_position_video = bool(self.settings.get("auto_position_videos", False))
+                        if auto_position_video:
+                            presentation = copy.deepcopy(presentation)
+                            presentation["text_position"] = "bottom"
                         fields = self._presentation_fields(presentation, "video")
                         before = self._presentation_before_image(presentation, fallback=first_f)
                         base, txt_overlay, rect, overflow = render_design_layers(
-                            width, height, presentation, fields, before_image=before)
+                            width, height, presentation, fields, before_image=before,
+                            auto_position_video=auto_position_video,
+                            video_fill_mode=self.settings.get("video_auto_position_fill", "panel"),
+                            video_source=first_f)
                         if overflow:
                             self._log_export(f"item {i}: design text exceeds the template safe area")
                         base.save(str(bg_p), "PNG")
@@ -261,18 +269,24 @@ class ExportMixin(ExportQualityMixin):
                         rotate_part = self.video_rotate_filter(edit)
                         crop_part = self.video_crop_filter(edit)
                         color_part = self.video_color_filter(edit)
-                        size_part = (f"scale={rw}:{rh}:force_original_aspect_ratio=increase,"
-                                     f"crop={rw}:{rh},setsar=1,format=rgba")
+                        if auto_position_video:
+                            size_part = (f"scale={rw}:{rh}:force_original_aspect_ratio=decrease,"
+                                         "setsar=1,format=rgba")
+                            overlay_position = f"{x}+(W-w)/2:{y}+(H-h)/2"
+                        else:
+                            size_part = (f"scale={rw}:{rh}:force_original_aspect_ratio=increase,"
+                                         f"crop={rw}:{rh},setsar=1,format=rgba")
+                            overlay_position = f"{x}:{y}"
                         vf = self.join_ffmpeg_filters(rotate_part, crop_part,
                                                       color_part, size_part)
                         in_args = (['-ss', f"{first_start:.3f}", '-i', str(path)] if first_start > 0.005
                                    else ['-i', str(path)])
                         cmd = (['ffmpeg', '-y'] + in_args +
                                ['-loop', '1', '-i', str(bg_p),
-                                '-loop', '1', '-i', str(txt_p),
-                                '-filter_complex',
-                                 f'{trim_prefix}{vf}[v];'
-                                 f'[1:v][v]overlay={x}:{y}:shortest=1[base];'
+                                 '-loop', '1', '-i', str(txt_p),
+                                 '-filter_complex',
+                                  f'{trim_prefix}{vf}[v];'
+                                  f'[1:v][v]overlay={overlay_position}:shortest=1[base];'
                                  f'[base][2:v]overlay=0:0:shortest=1,format=yuv420p',
                                  '-c:v', 'libx264', *self.video_encode_options(),
                                  '-r', '30', '-pix_fmt', 'yuv420p', '-t', str(dur),
@@ -283,27 +297,44 @@ class ExportMixin(ExportQualityMixin):
                         txt_overlay = self.render_text_on_image(
                             txt_overlay, text, width, height, align=presentation["text_align"])
                         txt_overlay.save(str(txt_p), "PNG")
-                        self._create_blur_bg(first_f, width, height).save(str(bg_p), "PNG")
+                        auto_position_video = bool(self.settings.get("auto_position_videos", False))
+                        if auto_position_video:
+                            if self.settings.get("video_auto_position_fill", "panel") == "blur":
+                                video_background = self._create_blur_bg(first_f, width, height)
+                            else:
+                                video_background = Image.new(
+                                    "RGB", (width, height), presentation["panel_color"])
+                            available_h, video_y = self._auto_video_text_layout(
+                                text, width, height)
+                            size_part = (f"scale={width}:{available_h}:"
+                                         "force_original_aspect_ratio=decrease")
+                            overlay_position = f"(W-w)/2:{video_y}"
+                        else:
+                            video_background = self._create_blur_bg(first_f, width, height)
+                            if self.settings["cropping"]:
+                                size_part = (f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                                             f"crop={width}:{height}")
+                            else:
+                                size_part = (f"scale={width}:{height}:force_original_aspect_ratio=decrease")
+                            overlay_position = "(W-w)/2:(H-h)/2"
+                        video_background.save(str(bg_p), "PNG")
 
                         # Rotate, then crop (fractions of the rotated source), then fit.
                         rotate_part = self.video_rotate_filter(edit)
                         crop_part = self.video_crop_filter(edit)
                         color_part = self.video_color_filter(edit)
-                        if self.settings["cropping"]:
-                            size_part = (f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-                                         f"crop={width}:{height}")
-                        else:
-                            size_part = (f"scale={width}:{height}:force_original_aspect_ratio=decrease")
-                        vf = self.join_ffmpeg_filters(rotate_part, crop_part,
-                                                      size_part, color_part)
+                        vf = self.join_ffmpeg_filters(
+                            rotate_part, crop_part, size_part, color_part,
+                            "setsar=1,format=rgba")
                         in_args = (['-ss', f"{first_start:.3f}", '-i', str(path)] if first_start > 0.005
                                    else ['-i', str(path)])
                         cmd = (['ffmpeg', '-y'] + in_args +
                                ['-loop', '1', '-i', str(bg_p),
                                 '-loop', '1', '-i', str(txt_p),
                                 '-filter_complex',
-                                 f'{trim_prefix}{vf},format=yuv420p[v];'
-                                 f'[1:v][v]overlay=(W-w)/2:(H-h)/2[base];[base][2:v]overlay=0:0',
+                                 f'{trim_prefix}{vf}[v];'
+                                 f'[1:v][v]overlay={overlay_position}[base];'
+                                 f'[base][2:v]overlay=0:0,format=yuv420p',
                                  '-c:v', 'libx264', *self.video_encode_options(),
                                  '-r', '30', '-pix_fmt', 'yuv420p', '-t', str(dur),
                                 '-an', str(clip_path)])

@@ -613,10 +613,14 @@ class PresentationMixin:
                                     frame, text, width, height,
                                     align=effective_values["text_align"])
                         else:
-                            frame = self._render_video_first_frame(source, width, height)
-                            frame = self.render_text_on_image(
-                                frame, text, width, height,
-                                align=effective_values["text_align"])
+                            if self.settings.get("auto_position_videos", False):
+                                frame = self._render_auto_position_video(
+                                    source, effective_values, text, width, height)
+                            else:
+                                frame = self._render_video_first_frame(source, width, height)
+                                frame = self.render_text_on_image(
+                                    frame, text, width, height,
+                                    align=effective_values["text_align"])
                         overflow = False
                     else:
                         fields = presentation_fields(values, raw_global)

@@ -237,7 +237,25 @@ class SettingsMixin:
         ttk.Checkbutton(tab_frame, text="Auto position photos (Text below)", variable=pos_img_var).pack(padx=20, pady=5, anchor='w')
 
         pos_vid_var = tk.BooleanVar(value=self.settings.get("auto_position_videos", False))
-        ttk.Checkbutton(tab_frame, text="Auto position videos (Text below)", variable=pos_vid_var).pack(padx=20, pady=5, anchor='w')
+        pos_vid_check = ttk.Checkbutton(
+            tab_frame, text="Auto position videos (Text below)", variable=pos_vid_var)
+        pos_vid_check.pack(padx=20, pady=5, anchor='w')
+        video_fill_frame = ttk.LabelFrame(tab_frame, text="Κενά γύρω από portrait video", padding=4)
+        video_fill_frame.pack(fill="x", padx=40, pady=(0, 5))
+        video_fill_var = tk.StringVar(
+            value=self.settings.get("video_auto_position_fill", "panel"))
+        for label, value in (("Χρώμα template / panel", "panel"),
+                             ("Blur από το ίδιο video", "blur")):
+            ttk.Radiobutton(video_fill_frame, text=label, variable=video_fill_var,
+                            value=value).pack(anchor="w")
+
+        def sync_video_fill_state(*_):
+            state = "normal" if pos_vid_var.get() else "disabled"
+            for child in video_fill_frame.winfo_children():
+                child.configure(state=state)
+
+        pos_vid_var.trace_add("write", sync_video_fill_state)
+        sync_video_fill_state()
 
         # ------------------------------------------------ Slides & Εφέ
         tab_slides = ttk.Frame(nb)
@@ -367,6 +385,7 @@ class SettingsMixin:
                 "resolution": res_var.get(), "background_mode": bg_var.get(),
                 "cropping": crop_var.get(), "slide_duration": dur_var.get(),
                 "auto_position_photos": pos_img_var.get(), "auto_position_videos": pos_vid_var.get(),
+                "video_auto_position_fill": video_fill_var.get(),
                 "transition_effect": chosen_value, "transition_duration": round(tr_dur_var.get(), 1),
                 "random_transitions": selected_randoms,
                 "video_brightness": vb, "video_color": vc,

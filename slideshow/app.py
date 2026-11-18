@@ -52,7 +52,7 @@ else:
 PROJECT_SETTING_KEYS = (
     "resolution", "background_mode", "cropping", "slide_duration",
     "transition_effect", "transition_duration", "random_transitions",
-    "auto_position_photos", "auto_position_videos",
+    "auto_position_photos", "auto_position_videos", "video_auto_position_fill",
 )
 PROJECT_RESOLUTIONS = {"1080x1080", "1920x1080", "1080x1920", "1080x1350", "720x1280"}
 PROJECT_BACKGROUNDS = {"white", "black", "blur", "fit_and_move"}
@@ -293,6 +293,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             # the music). Each video can override this from its Edit dialog.
             "video_audio": False,
             "video_audio_volume_db": 0,
+            "video_auto_position_fill": "panel",
             # Inpainting model for object erasing ("lama" or "migan").
             "erase_model": "lama",
             # Optional AI text improvement (inert until a key is stored here;
@@ -376,6 +377,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         for key in ("auto_position_photos", "auto_position_videos"):
             if isinstance(value.get(key), bool):
                 out[key] = value[key]
+        video_fill = value.get("video_auto_position_fill")
+        if video_fill in ("panel", "blur"):
+            out["video_auto_position_fill"] = video_fill
         return out
 
 

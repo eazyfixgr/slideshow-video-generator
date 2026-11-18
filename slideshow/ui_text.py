@@ -318,6 +318,8 @@ class TextInputMixin:
                 return self._render_fit_and_move_frame(frame, fit_move_data, 0.0, w, h, overlay)
             return self.render_text_on_image(frame, resolved, w, h,
                                              align=presentation["text_align"])
+        if self.settings.get("auto_position_videos", False):
+            return self._render_auto_position_video(img, presentation, resolved, w, h)
         frame = self._render_video_first_frame(img, w, h)
         return self.render_text_on_image(frame, resolved, w, h,
                                          align=presentation["text_align"])

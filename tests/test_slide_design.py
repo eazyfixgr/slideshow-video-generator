@@ -179,6 +179,14 @@ class PresentationModelTests(unittest.TestCase):
         self.assertEqual(normalized["transition_effect"], "random")
         self.assertEqual(normalized["transition_duration"], 0.2)
         self.assertNotIn("resolution", normalized)
+        video_settings = SlideshowApp._normalize_project_settings({
+            "auto_position_videos": True,
+            "video_auto_position_fill": "blur",
+            "invalid_video_fill": "blur",
+        })
+        self.assertTrue(video_settings["auto_position_videos"])
+        self.assertEqual(video_settings["video_auto_position_fill"], "blur")
+        self.assertNotIn("invalid_video_fill", video_settings)
 
     def test_old_caption_text_loads_even_when_new_project_metadata_exists(self):
         video, photo, mode, shared = SlideshowApp._project_caption_values({
@@ -338,6 +346,18 @@ class TemplateRendererTests(unittest.TestCase):
                                         (pixels[:, :, 3] > 0)))
 
         self.assertGreater(bright_text_pixels(90), bright_text_pixels(0))
+
+    def test_auto_position_video_fills_portrait_gaps_with_panel_or_blur(self):
+        source = Image.new("RGB", (320, 560), "#D02030")
+        presentation = normalize_presentation({"template": "navy_gold", "mode": "custom"})
+        panel, _ = compose_design_frame(
+            source, 360, 640, presentation, {}, auto_position_video=True,
+            video_fill_mode="panel")
+        blur, _ = compose_design_frame(
+            source, 360, 640, presentation, {}, auto_position_video=True,
+            video_fill_mode="blur")
+        self.assertEqual(panel.getpixel((1, 100)), (17, 27, 43))
+        self.assertEqual(blur.getpixel((1, 100)), (208, 32, 48))
 
     def test_legacy_template_alignment_defaults_left_and_can_be_changed(self):
         class ClassicRenderer(RenderMixin):

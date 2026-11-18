@@ -163,9 +163,12 @@ class PreviewMixin:
             if presentation["template"] != "legacy":
                 frame, _overflow = self._render_design_frame(first, edit, "video", w, h)
             else:
-                frame = self._render_video_first_frame(first, w, h)
-                frame = self.render_text_on_image(frame, text, w, h,
-                                                  align=presentation["text_align"])
+                if self.settings.get("auto_position_videos", False):
+                    frame = self._render_auto_position_video(first, presentation, text, w, h)
+                else:
+                    frame = self._render_video_first_frame(first, w, h)
+                    frame = self.render_text_on_image(frame, text, w, h,
+                                                      align=presentation["text_align"])
 
         frame = self._apply_watermark_overlay(frame)
         full = frame.copy()

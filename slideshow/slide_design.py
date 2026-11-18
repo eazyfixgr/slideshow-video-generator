@@ -9,7 +9,7 @@ import os
 import re
 import uuid
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
 TEMPLATES = {
@@ -262,6 +262,16 @@ def _fit_image(source, size):
     return resized.crop((x, y, x + tw, y + th))
 
 
+def _contain_image(source, size):
+    """Fit all of the media inside a rectangle without cropping its edges."""
+    tw, th = max(1, int(size[0])), max(1, int(size[1]))
+    source = source.convert("RGB")
+    scale = min(tw / source.width, th / source.height)
+    resized = source.resize((max(1, round(source.width * scale)),
+                             max(1, round(source.height * scale))), Image.Resampling.LANCZOS)
+    return resized
+
+
 def _font(family, size, bold=False):
     family = family if family in FONT_FILES else "Calibri"
     filename = FONT_FILES[family][1 if bold else 0]
@@ -392,7 +402,8 @@ def _place_logo(overlay, presentation, fonts, bounds, accent):
         return
 
 
-def render_design_layers(width, height, presentation, fields, before_image=None):
+def render_design_layers(width, height, presentation, fields, before_image=None,
+                         auto_position_video=False, video_fill_mode="panel", video_source=None):
     """Return (base, overlay, image_rect, overflow) for a professional template.
 
     ``base`` contains opaque panels and a static Before image where needed.
@@ -400,6 +411,8 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
     its own layer and is painted into ``image_rect`` by the caller.
     """
     p = normalize_presentation(presentation)
+    if auto_position_video:
+        p["text_position"] = "bottom"
     template = p["template"]
     w, h = max(2, int(width)), max(2, int(height))
     panel = p["panel_color"]
@@ -472,6 +485,8 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
             a = int(alpha * (gy - top) / max(1, h - top))
             draw.line((0, gy, w, gy), fill=(0, 0, 0, a))
         text_box = (margin, int(h * 0.62), w - margin * 2, int(h * 0.34))
+        if auto_position_video:
+            rect = (0, 0, w, int(h * 0.60))
     elif template == "lower_third":
         visible_text_keys = ("title", "subtitle", "description", "category", "location",
                              "price", "details", "cta", "business_name", "phone", "website")
@@ -505,11 +520,17 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
             text_box = (panel_x + pad, panel_y + pad,
                         max(1, panel_w - 2 * pad), max(1, content_h))
             logo_area = (panel_x, panel_y, panel_w, panel_h)
+            if auto_position_video:
+                rect = (0, 0, w, max(2, panel_y))
     elif template == "intro_outro":
         draw.rectangle((0, 0, w, max(2, int(h * 0.018))), fill=accent)
         draw.rectangle((0, h - max(2, int(h * 0.018)), w, h), fill=accent)
         text_box = (margin * 2, y + rh + margin, w - margin * 4,
                     max(0, h - y - rh - margin * 2))
+        if auto_position_video:
+            rect = (0, 0, w, int(h * 0.58))
+            text_box = (margin * 2, int(h * 0.62), w - margin * 4,
+                        max(0, h - int(h * 0.62) - margin * 2))
     elif template == "before_after":
         if before_image is not None:
             before_rect = (0, 0, x, h) if w / h >= 1.0 else (0, 0, w, y)
@@ -552,6 +573,15 @@ def render_design_layers(width, height, presentation, fields, before_image=None)
         text_box = (margin, int(h * .81), w - margin * 2, int(h * .17))
     else:
         return base, overlay, rect, False
+
+    if auto_position_video and rect[2] > 0 and rect[3] > 0:
+        rx, ry, rw, rh = rect
+        if video_fill_mode == "blur" and video_source is not None:
+            fill = _fit_image(video_source, (rw, rh)).filter(
+                ImageFilter.GaussianBlur(max(8, int(min(rw, rh) * .035))))
+        else:
+            fill = Image.new("RGB", (rw, rh), panel)
+        base.paste(fill, (rx, ry))
 
     logo_bounds = logo_area or text_box
     if (text_box and p.get("logo_enabled") and p.get("logo_path") and
@@ -695,13 +725,20 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
     return overflow
 
 
-def compose_design_frame(source, width, height, presentation, fields, before_image=None):
+def compose_design_frame(source, width, height, presentation, fields, before_image=None,
+                         auto_position_video=False, video_fill_mode="panel"):
     """Compose one actual media frame using the same reusable template layers."""
     base, overlay, rect, overflow = render_design_layers(
-        width, height, presentation, fields, before_image=before_image)
+        width, height, presentation, fields, before_image=before_image,
+        auto_position_video=auto_position_video, video_fill_mode=video_fill_mode,
+        video_source=source if auto_position_video else None)
     result = base.copy()
     x, y, rw, rh = rect
     if source is not None and rw > 0 and rh > 0:
-        result.paste(_fit_image(source, (rw, rh)), (x, y))
+        fitted = (_contain_image(source, (rw, rh)) if auto_position_video else
+                  _fit_image(source, (rw, rh)))
+        px = x + max(0, (rw - fitted.width) // 2)
+        py = y + max(0, (rh - fitted.height) // 2)
+        result.paste(fitted, (px, py))
     result = Image.alpha_composite(result.convert("RGBA"), overlay).convert("RGB")
     return result, overflow

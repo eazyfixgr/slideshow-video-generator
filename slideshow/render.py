@@ -129,10 +129,16 @@ class RenderMixin:
     def _render_design_frame(self, source, edit, m_type, width, height, global_text=None):
         """Render a still frame through the shared slide template engine."""
         presentation = self._presentation_for(edit)
+        auto_position_video = (m_type == "video" and
+                               self.settings.get("auto_position_videos", False))
+        if auto_position_video:
+            presentation["text_position"] = "bottom"
         fields = self._presentation_fields(presentation, m_type, global_text)
         before = self._presentation_before_image(presentation, fallback=source)
         frame, overflow = compose_design_frame(
-            source, width, height, presentation, fields, before_image=before)
+            source, width, height, presentation, fields, before_image=before,
+            auto_position_video=auto_position_video,
+            video_fill_mode=self.settings.get("video_auto_position_fill", "panel"))
         return frame, overflow
 
 
@@ -160,6 +166,35 @@ class RenderMixin:
                 x += f.getlength(txt)
             y += lh
         return img
+
+
+    def _auto_video_text_layout(self, text, width, height):
+        """Reserve a bottom caption area so auto-positioned video stays unobscured."""
+        if not (text or "").strip():
+            return max(1, int(height)), 0
+        font_size = int(self.settings.get("font_size", 32))
+        _parts, lines = self._wrap_text_lines(text, width, font_size)
+        text_height = len(lines) * (font_size + 5) + 40
+        return max(100, int(height) - text_height), 20
+
+
+    def _render_auto_position_video(self, source, presentation, text, width, height):
+        """Fit the whole video above its caption and fill side gaps consistently."""
+        available_h, top = self._auto_video_text_layout(text, width, height)
+        if self.settings.get("video_auto_position_fill", "panel") == "blur":
+            frame = self._create_blur_bg(source, width, height)
+        else:
+            frame = Image.new("RGB", (width, height),
+                              presentation.get("panel_color", "#111B2B"))
+        source = source.convert("RGB")
+        scale = min(width / source.width, available_h / source.height)
+        fitted = source.resize((max(1, round(source.width * scale)),
+                               max(1, round(source.height * scale))),
+                              Image.Resampling.LANCZOS)
+        x = max(0, (width - fitted.width) // 2)
+        frame.paste(fitted, (x, top))
+        return self.render_text_on_image(
+            frame, text, width, height, align=presentation["text_align"])
 
 
     @staticmethod
