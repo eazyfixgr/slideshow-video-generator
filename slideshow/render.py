@@ -142,7 +142,7 @@ class RenderMixin:
         return frame, overflow
 
 
-    def render_text_on_image(self, img, text, w, h, align="left"):
+    def render_text_on_image(self, img, text, w, h, align="center"):
         if not text:
             return img
         img = img.copy().convert("RGBA")
@@ -306,7 +306,7 @@ class RenderMixin:
         return bg.crop((x0, y0, x0 + tw, y0 + th)).filter(ImageFilter.GaussianBlur(30))
 
 
-    def _make_text_overlay(self, text, width, height, align="left"):
+    def _make_text_overlay(self, text, width, height, align="center"):
         """Precompute the text overlay (white box + text on a transparent layer)
         once, so it can be pasted onto every frame cheaply instead of re-rendering
         the text 120 times per photo."""
@@ -338,7 +338,7 @@ class RenderMixin:
 
 
     def _render_fit_and_move_clip(self, bg, fit_move_data, temp_dir, index, width, height,
-                                  image_duration, clip_path, text_align="left",
+                                  image_duration, clip_path, text_align="center",
                                   design_layers=None):
         """Render a slow pan clip for the 'Fit and Move' background mode.
 

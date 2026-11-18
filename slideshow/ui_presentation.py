@@ -427,7 +427,7 @@ class PresentationMixin:
         ttk.Label(alignment_row, text="Στοίχιση κειμένου", width=17).pack(side="left")
         alignment_var = tk.StringVar(value=next(
             (label for label, value in ALIGNMENT_LABELS.items()
-             if value == draft["text_align"]), "Αριστερά"))
+             if value == draft["text_align"]), "Κέντρο"))
         ttk.Combobox(alignment_row, textvariable=alignment_var, state="readonly",
                      values=list(ALIGNMENT_LABELS)).pack(side="left", fill="x", expand=True)
         alignment_var.trace_add("write", schedule_preview)
@@ -541,7 +541,7 @@ class PresentationMixin:
                 values["template"] = next((key for key, label in TEMPLATES.items()
                                             if label == selected_template), "legacy")
             values["text_position"] = POSITION_LABELS.get(position_var.get(), "bottom")
-            values["text_align"] = ALIGNMENT_LABELS.get(alignment_var.get(), "left")
+            values["text_align"] = ALIGNMENT_LABELS.get(alignment_var.get(), "center")
             values["featured_enabled"] = featured_enabled_var.get()
             values["featured_text"] = featured_text_var.get()
             values["panel_style"] = PANEL_STYLE_LABELS.get(panel_style_var.get(), "solid")
@@ -653,7 +653,7 @@ class PresentationMixin:
                                            if item == value), "Κάτω"))
                 elif key == "text_align":
                     alignment_var.set(next((label for label, item in ALIGNMENT_LABELS.items()
-                                            if item == value), "Αριστερά"))
+                                            if item == value), "Κέντρο"))
                 elif key == "featured_enabled":
                     featured_enabled_var.set(bool(value))
                 elif key == "featured_text":

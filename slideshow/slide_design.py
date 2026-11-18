@@ -63,7 +63,7 @@ DEFAULT_PRESENTATION = {
     "before_label": "ΠΡΙΝ",
     "after_label": "ΜΕΤΑ",
     "text_position": "bottom",
-    "text_align": "left",
+    "text_align": "center",
     "font_family": "",
     "font_size": 90,
     "text_color": "#FFFFFF",
@@ -117,7 +117,7 @@ def normalize_presentation(value=None, scene_id=None):
             data.get("text_position") not in _TEXT_POSITIONS):
         data["text_position"] = "bottom"
     if not isinstance(data.get("text_align"), str) or data.get("text_align") not in _TEXT_ALIGNMENTS:
-        data["text_align"] = "left"
+        data["text_align"] = "center"
     if not isinstance(data.get("panel_style"), str) or data.get("panel_style") not in _PANEL_STYLES:
         data["panel_style"] = "solid"
     if not isinstance(data.get("transition"), str) or data.get("transition") not in _TRANSITIONS:

@@ -293,13 +293,16 @@ class TemplateRendererTests(unittest.TestCase):
         self.assertFalse(old_real_estate["featured_enabled"])
         self.assertEqual(old_real_estate["featured_text"], "PROPERTY")
         self.assertEqual(old_real_estate["text_position"], "bottom")
-        self.assertEqual(old_real_estate["text_align"], "left")
+        self.assertEqual(old_real_estate["text_align"], "center")
         self.assertFalse(normalize_presentation({"template": "navy_gold"})["featured_enabled"])
         self.assertFalse(normalize_presentation({
             "template": "business_service"})["featured_enabled"])
         self.assertEqual(normalize_presentation({
             "text_position": "template", "text_align": "justify"})["text_position"], "bottom")
-        self.assertEqual(normalize_presentation({"text_align": "justify"})["text_align"], "left")
+        self.assertEqual(normalize_presentation({"text_align": "justify"})["text_align"], "center")
+        for template in TEMPLATES:
+            self.assertEqual(normalize_presentation({"template": template})["text_align"],
+                             "center")
 
     def test_navy_gold_featured_badge_can_be_disabled_or_renamed(self):
         source = Image.new("RGB", (640, 800), "#52677A")
@@ -378,16 +381,19 @@ class TemplateRendererTests(unittest.TestCase):
         self.assertEqual(frame.getpixel((180, 20)), (208, 32, 48))
         self.assertEqual(frame.getpixel((180, 300)), (17, 27, 43))
 
-    def test_legacy_template_alignment_defaults_left_and_can_be_changed(self):
+    def test_legacy_template_alignment_defaults_center_and_can_be_changed(self):
         class ClassicRenderer(RenderMixin):
             settings = {"font_size": 24, "font_family": "Arial", "text_style": "black_box"}
 
         renderer = object.__new__(ClassicRenderer)
         source = Image.new("RGBA", (400, 240), (0, 0, 0, 0))
-        left = renderer.render_text_on_image(source, "Classic caption", 400, 240)
+        center = renderer.render_text_on_image(source, "Classic caption", 400, 240)
         right = renderer.render_text_on_image(source, "Classic caption", 400, 240,
                                               align="right")
-        self.assertEqual(left.getchannel("A").getbbox()[0], 0)
+        center_box = center.getchannel("A").getbbox()
+        self.assertGreater(center_box[0], 0)
+        self.assertLess(center_box[2], 400)
+        self.assertAlmostEqual((center_box[0] + center_box[2]) / 2, 200, delta=10)
         self.assertEqual(right.getchannel("A").getbbox()[2], 400)
 
 
