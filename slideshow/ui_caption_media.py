@@ -8,7 +8,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 from .deps import Image, ImageTk
-from .slide_design import normalize_presentation
+from .slide_design import (DEFAULT_PRESENTATION, DESIGN_FIELDS, INHERIT_TEMPLATE,
+                           INHERIT_TEMPLATE_LABEL, TEMPLATES, normalize_presentation)
+from .design_templates import read_design_templates
 
 
 class MediaCaptionMixin:
@@ -119,7 +121,7 @@ class MediaCaptionMixin:
         page = ttk.Frame(parent)
         page.pack(fill="both", expand=True)
         page.columnconfigure(0, weight=1)
-        page.rowconfigure(1, weight=1)
+        page.rowconfigure(3, weight=1)
 
         mode_row = ttk.Frame(page)
         mode_row.grid(row=0, column=0, sticky="ew", pady=(0, 7))
@@ -129,8 +131,56 @@ class MediaCaptionMixin:
                                   state="readonly", width=34)
         mode_combo.pack(side="left", fill="x", expand=True)
 
+        style_row = ttk.Frame(page)
+        style_row.grid(row=1, column=0, sticky="ew", pady=(0, 7))
+        style_row.columnconfigure(1, weight=1)
+        ttk.Label(style_row, text="Στυλ slides", font=("Calibri", 10, "bold")).grid(
+            row=0, column=0, sticky="w", padx=(0, 8))
+        initial_template = (normalize_presentation(media[0][2].get("presentation"))["template"]
+                            if media else INHERIT_TEMPLATE)
+        initial_style_label = (INHERIT_TEMPLATE_LABEL if initial_template == INHERIT_TEMPLATE else
+                               TEMPLATES.get(initial_template, TEMPLATES["legacy"]))
+        style_var = tk.StringVar(value=initial_style_label)
+        style_combo = ttk.Combobox(style_row, textvariable=style_var, state="readonly", width=24)
+        style_combo.grid(row=0, column=1, sticky="ew", padx=(0, 5))
+        design_button = ttk.Button(style_row, text="Σχεδίαση…")
+        design_button.grid(row=0, column=2, sticky="e")
+        ttk.Label(style_row, text="Εφαρμογή σε:").grid(
+            row=1, column=0, sticky="w", padx=(0, 8), pady=(4, 0))
+        style_scope_labels = {
+            "Όλα τα video" if media_type == "video" else "Όλες οι φωτογραφίες": "all",
+            "Επιλεγμένα media / group": "selected",
+        }
+        style_scope_by_value = {value: label for label, value in style_scope_labels.items()}
+        style_scope_var = tk.StringVar(value=style_scope_by_value["all"])
+        style_scope_combo = ttk.Combobox(
+            style_row, textvariable=style_scope_var, state="readonly",
+            values=list(style_scope_labels), width=24)
+        style_scope_combo.grid(row=1, column=1, sticky="ew", padx=(0, 5), pady=(4, 0))
+        apply_style_button = ttk.Button(style_row, text="Εφαρμογή στυλ")
+        apply_style_button.grid(row=1, column=2, sticky="e", pady=(4, 0))
+        style_status = ttk.Label(style_row, text="", foreground="#2d6cdf")
+        style_status.grid(row=2, column=0, columnspan=3, sticky="w", pady=(3, 0))
+        custom_templates = read_design_templates(self.settings)
+        style_choices = {}
+
+        def refresh_style_templates():
+            custom_templates.clear()
+            custom_templates.update(read_design_templates(self.settings))
+            style_choices.clear()
+            style_choices.update({label: ("built_in", key)
+                                 for key, label in TEMPLATES.items()})
+            style_choices[INHERIT_TEMPLATE_LABEL] = ("built_in", INHERIT_TEMPLATE)
+            for name, values in custom_templates.items():
+                style_choices[f"★ {name}"] = ("custom", name)
+            style_combo.configure(values=list(style_choices))
+            if style_var.get() not in style_choices:
+                style_var.set(TEMPLATES.get(self.project_template, TEMPLATES["legacy"]))
+
+        refresh_style_templates()
+
         body = ttk.Frame(page)
-        body.grid(row=1, column=0, sticky="nsew")
+        body.grid(row=3, column=0, sticky="nsew")
         body.columnconfigure(0, weight=1)
         body.columnconfigure(1, weight=2)
         body.rowconfigure(0, weight=1)
@@ -220,8 +270,6 @@ class MediaCaptionMixin:
         controls.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         apply_caption = ttk.Button(controls, text="Αποθήκευση caption")
         apply_caption.pack(side="left")
-        design_button = ttk.Button(controls, text="Template / σχεδίαση…")
-        design_button.pack(side="right")
         hint = ttk.Label(caption_frame, text="", foreground="#666", wraplength=640)
         hint.grid(row=5, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
@@ -291,6 +339,8 @@ class MediaCaptionMixin:
             caption_title_label.config(text=f"Caption: {Path(self.media_files[index][1]).name}")
             apply_caption.config(text="Αποθήκευση caption")
             hint.config(text="Το caption αποθηκεύεται ανά media. Το template και το crop μένουν ανεξάρτητα.")
+            group_box.pack_forget()
+            update_style_scope()
             schedule_preview()
 
         def tree_selection(_event=None):
@@ -310,8 +360,13 @@ class MediaCaptionMixin:
                 hint.config(text="Το κείμενο παρακάτω θα εφαρμοστεί μόνο στα media που εμφανίζονται "
                                  "στη λίστα «Μέλη του group».")
                 schedule_preview()
+            elif (state["mode"] == "shared" and
+                  style_scope_labels.get(style_scope_var.get()) == "selected"):
+                refresh_group_summary(selected_indices)
+                schedule_preview()
             else:
                 schedule_preview()
+            update_style_scope()
 
         def schedule_preview():
             selected_ids = list(tree.selection())
@@ -352,7 +407,10 @@ class MediaCaptionMixin:
                 save_current()
             state["mode"] = new_mode
             if new_mode == "shared":
-                tree.configure(selectmode="browse")
+                tree.configure(selectmode=("extended" if
+                                           style_scope_labels.get(style_scope_var.get()) == "selected"
+                                           else "browse"))
+                style_scope_combo.configure(state="readonly")
                 caption_frame.grid_remove()
                 shared_frame.grid()
                 preview_box.config(text="Preview κοινού caption στο επιλεγμένο media")
@@ -360,6 +418,7 @@ class MediaCaptionMixin:
                                           else "Εφαρμογή κοινού caption σε ΟΛΕΣ τις φωτογραφίες"))
                 apply_shared.state(["!disabled"])
             else:
+                style_scope_combo.configure(state="disabled")
                 shared_frame.grid_remove()
                 caption_frame.grid()
                 preview_box.config(text="Preview caption επιλεγμένου media")
@@ -386,11 +445,87 @@ class MediaCaptionMixin:
                     refresh_group_summary([])
                     hint.config(text="1. Επίλεξε media με Ctrl/Shift+κλικ. 2. Γράψε το caption. "
                                      "3. Πάτησε «Εφαρμογή στα επιλεγμένα».")
-            if new_mode == "group":
+            if (new_mode == "group" or
+                    (new_mode == "shared" and
+                     style_scope_labels.get(style_scope_var.get()) == "selected")):
                 group_box.pack(fill="x", pady=(6, 0))
+                refresh_group_summary()
             else:
                 group_box.pack_forget()
+            update_style_scope()
             schedule_preview()
+
+        def style_target_indices():
+            if state["mode"] == "shared":
+                if style_scope_labels.get(style_scope_var.get()) == "all":
+                    return [index for index, _path, _edit in media]
+                return [int(item_id) for item_id in tree.selection()]
+            if state["mode"] == "individual":
+                current = state.get("current")
+                return [current] if current is not None else []
+            return [int(item_id) for item_id in tree.selection()]
+
+        def update_style_scope():
+            style_scope_combo.configure(state=("readonly" if state["mode"] == "shared"
+                                               else "disabled"))
+            if state["mode"] == "shared":
+                selected_scope = style_scope_labels.get(style_scope_var.get()) == "selected"
+                scope = ("τα επιλεγμένα media / group" if selected_scope else
+                         "όλα τα media αυτού του τύπου")
+                button_text = ("Εφαρμογή στυλ στα επιλεγμένα" if selected_scope else
+                               "Εφαρμογή στυλ σε όλα")
+            elif state["mode"] == "individual":
+                selected_scope = False
+                scope = "το media που έχεις επιλέξει"
+                button_text = "Εφαρμογή στυλ στο επιλεγμένο"
+            else:
+                selected_scope = True
+                scope = "τα επιλεγμένα μέλη του group"
+                button_text = "Εφαρμογή στυλ στο group"
+            style_status.config(text=f"Το στυλ εφαρμόζεται σε {scope}.")
+            apply_style_button.config(text=button_text)
+            apply_style_button.state(["!disabled"] if style_target_indices() else ["disabled"])
+
+        def style_scope_changed(*_):
+            if state["mode"] != "shared":
+                return
+            selected_scope = style_scope_labels.get(style_scope_var.get()) == "selected"
+            tree.configure(selectmode="extended" if selected_scope else "browse")
+            if selected_scope:
+                group_box.pack(fill="x", pady=(6, 0))
+                refresh_group_summary()
+            else:
+                group_box.pack_forget()
+            update_style_scope()
+            schedule_preview()
+
+        def apply_style_to_scope():
+            indices = style_target_indices()
+            if not indices:
+                messagebox.showinfo("Template", "Επίλεξε πρώτα media ή ομάδα.", parent=dialog)
+                return
+            kind, value = style_choices[style_var.get()]
+            reset_fields = ("text_position", "text_align", "font_family", "font_size",
+                            "text_color", "panel_color", "accent_color", "panel_style",
+                            "featured_enabled", "featured_text")
+            for index in indices:
+                edit = self.media_files[index][2]
+                presentation = normalize_presentation(edit.get("presentation"))
+                if kind == "custom":
+                    template_data = custom_templates[value]
+                    for field in DESIGN_FIELDS:
+                        presentation[field] = copy.deepcopy(template_data[field])
+                else:
+                    presentation["template"] = value
+                    for field in reset_fields:
+                        presentation[field] = copy.deepcopy(DEFAULT_PRESENTATION[field])
+                edit["presentation"] = normalize_presentation(
+                    presentation, scene_id=presentation["scene_id"])
+            self.is_modified = True
+            self.update_media_display()
+            self._schedule_preview()
+            schedule_preview()
+            style_status.config(text=f"Στυλ εφαρμόστηκε σε {len(indices)} media. Τα captions διατηρήθηκαν.")
 
         def sync_shared_text(_event=None, force=False):
             value = shared_text.get("1.0", "end-1c").strip()
@@ -463,6 +598,7 @@ class MediaCaptionMixin:
         shared_text.bind("<KeyRelease>", sync_shared_text, add="+")
         self._bind_captions_text(shared_text, lambda: sync_shared_text())
         mode_combo.bind("<<ComboboxSelected>>", mode_changed, add="+")
+        style_scope_combo.bind("<<ComboboxSelected>>", style_scope_changed, add="+")
         tree.bind("<<TreeviewSelect>>", queue_tree_selection)
         tree.bind("<ButtonRelease-1>", queue_tree_selection, add="+")
         tree.bind("<KeyRelease>", queue_tree_selection, add="+")
@@ -480,7 +616,10 @@ class MediaCaptionMixin:
 
         def open_design():
             if state["mode"] == "individual" and state.get("current") is not None:
-                self.open_presentation_editor(state["current"])
+                design_dialog = self.open_presentation_editor(state["current"])
+                if design_dialog is not None:
+                    design_dialog.bind("<Destroy>", lambda event: (
+                        refresh_style_templates() if event.widget is design_dialog else None), add="+")
                 return
             selected_indices = [int(item_id) for item_id in tree.selection()]
             if state["mode"] == "shared":
@@ -488,9 +627,13 @@ class MediaCaptionMixin:
             if not selected_indices:
                 selected_indices = [index for index, _path, _edit in media[:1]]
             self.selected_indices = set(selected_indices)
-            self.open_storyboard_editor()
+            design_dialog = self.open_storyboard_editor()
+            if design_dialog is not None:
+                design_dialog.bind("<Destroy>", lambda event: (
+                    refresh_style_templates() if event.widget is design_dialog else None), add="+")
 
         design_button.config(command=open_design)
+        apply_style_button.config(command=apply_style_to_scope)
 
         def load_thumbnail(index, path):
             image = (self._video_first_frame(path) if media_type == "video" else Image.open(path))
@@ -549,5 +692,6 @@ class MediaCaptionMixin:
                 "reload_shared": lambda: self._replace_caption_text(
                     shared_text, self.get_text_for(media_type)),
                 "refresh_preview": schedule_preview,
+                "refresh_templates": refresh_style_templates,
                 "focus": tree.focus_set,
                 "shutdown": shutdown}

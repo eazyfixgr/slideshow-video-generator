@@ -17,8 +17,8 @@ class ExportQualityMixin:
         """Compute a conservative video bitrate for a target total file size."""
         target_bytes = max(10.0, min(99.0, float(target_mb))) * 1_000_000
         duration = max(1.0, float(duration))
-        video_budget = target_bytes * 8 * 0.88 / duration
-        return max(64_000, min(20_000_000, int(video_budget - audio_bitrate)))
+        total_bitrate = target_bytes * 8 / duration
+        return max(16_000, min(20_000_000, int(total_bitrate - audio_bitrate)))
 
     def estimate_export_duration(self):
         """Estimate total slide duration without subtracting transition overlaps."""

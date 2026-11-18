@@ -80,6 +80,12 @@ DEFAULT_PRESENTATION = {
     "transition_duration": None,
     "motion": {"preset": "static"},
 }
+DESIGN_FIELDS = (
+    "template", "text_position", "text_align", "featured_enabled", "featured_text",
+    "font_family", "font_size", "text_color", "panel_color", "accent_color",
+    "panel_style", "duration", "logo_enabled", "logo_path", "transition",
+    "transition_duration", "motion",
+)
 
 _MODES = {"global", "custom", "none", "combine"}
 _TEXT_POSITIONS = {"top", "center", "bottom"}

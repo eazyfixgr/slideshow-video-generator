@@ -362,6 +362,8 @@ class CaptionsMixin(MediaCaptionMixin):
                         schedule_project_preview()
                         video_state["refresh_preview"]()
                         photo_state["refresh_preview"]()
+                        video_state["refresh_templates"]()
+                        photo_state["refresh_templates"]()
                         dialog.grab_set()
                 except tk.TclError:
                     pass

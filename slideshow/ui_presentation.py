@@ -8,10 +8,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog, colorchooser
 
 from .deps import Image, ImageTk
-from .slide_design import (DEFAULT_PRESENTATION, TEMPLATES, compose_design_frame,
+from .slide_design import (DEFAULT_PRESENTATION, DESIGN_FIELDS, TEMPLATES, compose_design_frame,
                            INHERIT_TEMPLATE, INHERIT_TEMPLATE_LABEL,
                            has_presentation_settings, normalize_presentation,
                            normalize_template, presentation_fields)
+from .design_templates import read_design_templates, write_design_templates
 
 
 MODE_LABELS = {
@@ -24,10 +25,7 @@ MODE_BY_VALUE = {value: label for label, value in MODE_LABELS.items()}
 POSITION_LABELS = {"Πάνω": "top", "Κέντρο": "center", "Κάτω": "bottom"}
 ALIGNMENT_LABELS = {"Αριστερά": "left", "Κέντρο": "center", "Δεξιά": "right"}
 PANEL_STYLE_LABELS = {"Συμπαγές": "solid", "Ημιδιαφανές": "translucent"}
-DESIGN_KEYS = ("template", "text_position", "text_align", "featured_enabled", "featured_text",
-               "font_family", "font_size", "text_color", "panel_color", "accent_color",
-               "panel_style", "duration", "logo_enabled", "logo_path",
-               "transition", "transition_duration", "motion")
+DESIGN_KEYS = DESIGN_FIELDS
 class PresentationMixin:
     """Build the Presentation tab used by both photo and video editors."""
 
@@ -162,7 +160,9 @@ class PresentationMixin:
         items.bind("<<ListboxSelect>>", on_select)
         items.bind("<Double-Button-1>", on_select)
         if self.media_files:
-            select_item(0)
+            selected = {index for index in getattr(self, "selected_indices", set())
+                        if 0 <= index < len(self.media_files)}
+            select_item(min(selected) if selected else 0)
         else:
             ttk.Label(right, text="Πρόσθεσε media στο project για να επεξεργαστείς slides.",
                       foreground="#666").pack(expand=True)
@@ -339,16 +339,16 @@ class PresentationMixin:
 
         preset_row = ttk.Frame(form)
         preset_row.pack(fill="x", padx=8, pady=3)
-        ttk.Label(preset_row, text="Design preset", width=17).pack(side="left")
+        ttk.Label(preset_row, text="Αποθηκευμένο template", width=17).pack(side="left")
         preset_var = tk.StringVar()
-        saved_presets = self.settings.get("slide_design_presets", {})
-        if not isinstance(saved_presets, dict):
-            saved_presets = {}
+        saved_templates = read_design_templates(self.settings)
         preset_combo = ttk.Combobox(
             preset_row, textvariable=preset_var, state="readonly",
-            values=sorted(saved_presets.keys()))
+            values=sorted(saved_templates.keys()))
         preset_combo.pack(side="left", fill="x", expand=True)
-        ttk.Button(preset_row, text="Φόρτωση", command=lambda: load_preset()).pack(side="left", padx=4)
+        open_template_button = ttk.Button(
+            preset_row, text="Άνοιγμα", command=lambda: load_template(), state="disabled")
+        open_template_button.pack(side="left", padx=4)
 
         duration_row = ttk.Frame(form)
         duration_row.pack(fill="x", padx=8, pady=4)
@@ -484,25 +484,30 @@ class PresentationMixin:
         button_row.grid(row=3, column=0, sticky="ew", padx=6, pady=6)
         button_row.columnconfigure(0, weight=1)
         button_row.columnconfigure(1, weight=1)
-        ttk.Button(button_row, text="↻ Πρότυπα defaults", command=lambda: reset_design()).grid(
+        ttk.Button(button_row, text="Επαναφορά template", command=lambda: reset_design()).grid(
             row=0, column=0, sticky="ew", padx=2, pady=2)
-        ttk.Button(button_row, text="Αποθήκευση preset…", command=lambda: save_preset()).grid(
+        ttk.Button(button_row, text="Δημιουργία νέου template…",
+                   command=lambda: create_template()).grid(
             row=0, column=1, sticky="ew", padx=2, pady=2)
-        ttk.Button(button_row, text="Template → επιλεγμένα (Ctrl/Shift)",
-                   command=lambda: apply_template_selected()).grid(
-            row=1, column=0, sticky="ew", padx=2, pady=2)
-        ttk.Button(button_row, text="Template → ΟΛΑ",
-                   command=lambda: apply_template_all()).grid(
-            row=1, column=1, sticky="ew", padx=2, pady=2)
-        ttk.Button(button_row, text="Πλήρες σχέδιο → επιλεγμένα",
-                   command=lambda: apply_design_selected()).grid(
-            row=2, column=0, sticky="ew", padx=2, pady=2)
-        ttk.Button(button_row, text="Εφαρμογή τρέχοντος slide",
+        update_template_button = ttk.Button(
+            button_row, text="Ενημέρωση template", command=lambda: update_template(),
+            state="disabled")
+        update_template_button.grid(row=1, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_row, text="Αποθήκευση αλλαγών τρέχοντος slide",
                    command=lambda: apply_current()).grid(
-            row=2, column=1, sticky="ew", padx=2, pady=2)
-        ttk.Button(button_row, text="Πλήρες σχέδιο → ΟΛΑ τα media",
+            row=1, column=1, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_row, text="Εφαρμογή μόνο εμφάνισης στα επιλεγμένα",
+                   command=lambda: apply_design_selected()).grid(
+            row=2, column=0, columnspan=2, sticky="ew", padx=2, pady=2)
+        ttk.Button(button_row, text="Εφαρμογή μόνο εμφάνισης σε όλα τα media",
                    command=lambda: apply_design_all()).grid(
             row=3, column=0, columnspan=2, sticky="ew", padx=2, pady=2)
+        ttk.Label(button_row, text="Η αποθήκευση τρέχοντος slide κρατά όλες τις αλλαγές του. "
+                            "Τα κουμπιά «Εφαρμογή μόνο εμφάνισης» διατηρούν τα captions. "
+                            "Επιλεγμένα = Ctrl/Shift στη βιβλιοθήκη + τρέχον slide.",
+                  foreground="#666", wraplength=360,
+                  justify="left").grid(
+            row=4, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 0))
 
         def choose_logo():
             path = filedialog.askopenfilename(
@@ -625,83 +630,10 @@ class PresentationMixin:
                     self._post_ui(preview_status.config, text=f"Preview error: {error}")
             threading.Thread(target=worker, daemon=True).start()
 
-        def reset_design():
-            fresh = normalize_presentation({"scene_id": original["scene_id"]})
+        def populate_design_fields(values):
+            values = normalize_presentation(values)
             for key in DESIGN_KEYS:
-                if key == "font_family":
-                    value = self.settings.get("font_family", "Calibri")
-                else:
-                    value = fresh.get(key, DEFAULT_PRESENTATION.get(key))
-                if key == "template":
-                    template_var.set(INHERIT_TEMPLATE_LABEL if value == INHERIT_TEMPLATE else
-                                     TEMPLATES[normalize_template(value)])
-                elif key == "text_position":
-                    position_var.set(next((label for label, item in POSITION_LABELS.items()
-                                           if item == value), "Κάτω"))
-                elif key == "text_align":
-                    alignment_var.set(next((label for label, item in ALIGNMENT_LABELS.items()
-                                            if item == value), "Αριστερά"))
-                elif key == "featured_enabled":
-                    featured_enabled_var.set(value)
-                elif key == "featured_text":
-                    featured_text_var.set(value)
-                elif key == "font_family":
-                    font_var.set(value)
-                elif key == "font_size":
-                    font_size_var.set(value)
-                elif key == "text_color":
-                    color_vars[key].set(value)
-                elif key == "panel_color":
-                    color_vars[key].set(value)
-                elif key == "accent_color":
-                    color_vars[key].set(value)
-                elif key == "panel_style":
-                    panel_style_var.set(next((label for label, item in PANEL_STYLE_LABELS.items()
-                                              if item == value), "Συμπαγές"))
-                elif key == "duration":
-                    duration_enabled.set(False)
-                elif key == "logo_enabled":
-                    logo_enabled.set(False)
-                elif key == "logo_path":
-                    logo_var.set("")
-                elif key == "transition":
-                    transition_var.set("Παγκόσμια ρύθμιση")
-                elif key == "transition_duration":
-                    custom_transition_duration.set(False)
-            schedule_preview()
-
-        def save_preset():
-            name = simpledialog.askstring("Design preset", "Όνομα preset:",
-                                          parent=parent.winfo_toplevel())
-            if not name or not name.strip():
-                return
-            values = current_data()
-            preset = {key: copy.deepcopy(values[key]) for key in DESIGN_KEYS}
-            presets = self.settings.get("slide_design_presets")
-            if not isinstance(presets, dict):
-                presets = {}
-                self.settings["slide_design_presets"] = presets
-            if name.strip() in presets and not messagebox.askyesno(
-                    "Design preset", f"Να αντικατασταθεί το preset «{name.strip()}»;",
-                    parent=parent.winfo_toplevel()):
-                return
-            presets[name.strip()] = preset
-            self.save_settings()
-            preset_combo.configure(values=sorted(presets))
-            preset_var.set(name.strip())
-            messagebox.showinfo("Design preset", f"Αποθηκεύτηκε το preset «{name.strip()}».",
-                                parent=parent.winfo_toplevel())
-
-        def load_preset():
-            all_presets = self.settings.get("slide_design_presets", {})
-            if not isinstance(all_presets, dict):
-                return
-            preset = all_presets.get(preset_var.get())
-            if not isinstance(preset, dict):
-                return
-            preset = normalize_presentation(preset)
-            for key in DESIGN_KEYS:
-                value = copy.deepcopy(preset[key])
+                value = copy.deepcopy(values[key])
                 if key == "template":
                     template_var.set(INHERIT_TEMPLATE_LABEL if value == INHERIT_TEMPLATE else
                                      TEMPLATES[normalize_template(value)])
@@ -739,7 +671,78 @@ class PresentationMixin:
                     logo_enabled.set(bool(value))
                 elif key == "logo_path":
                     logo_var.set(value or "")
+                elif key == "motion":
+                    draft["motion"] = value
             schedule_preview()
+
+        def reset_design():
+            selected_name = preset_var.get()
+            if selected_name in saved_templates:
+                load_template()
+                preview_status.config(text=f"Το template «{selected_name}» επανήλθε στις αποθηκευμένες ρυθμίσεις")
+                return
+            selected_template = (INHERIT_TEMPLATE if template_var.get() == INHERIT_TEMPLATE_LABEL else
+                                 next((key for key, label in TEMPLATES.items()
+                                       if label == template_var.get()), "legacy"))
+            fresh = normalize_presentation({"scene_id": original["scene_id"],
+                                            "template": selected_template})
+            populate_design_fields(fresh)
+
+        def save_template_values(name, values):
+            saved_templates[name] = {key: copy.deepcopy(values[key]) for key in DESIGN_KEYS}
+            stored = write_design_templates(self.settings, saved_templates)
+            saved_templates.clear()
+            saved_templates.update(stored)
+            preset_combo.configure(values=sorted(saved_templates))
+            preset_var.set(name)
+            self.save_settings()
+            refresh_template_buttons()
+
+        def create_template():
+            name = simpledialog.askstring(
+                "Δημιουργία template", "Όνομα νέου template:",
+                parent=parent.winfo_toplevel())
+            if not name or not name.strip():
+                return
+            name = name.strip()
+            if name in saved_templates and not messagebox.askyesno(
+                    "Template υπάρχει ήδη", f"Να αντικατασταθεί το template «{name}»;",
+                    parent=parent.winfo_toplevel()):
+                return
+            save_template_values(name, current_data())
+            preview_status.config(text=f"Δημιουργήθηκε το template «{name}»")
+
+        def update_template():
+            name = preset_var.get()
+            if name not in saved_templates:
+                messagebox.showinfo("Ενημέρωση template", "Άνοιξε πρώτα ένα αποθηκευμένο template.",
+                                    parent=parent.winfo_toplevel())
+                return
+            if not messagebox.askyesno(
+                    "Ενημέρωση template",
+                    f"Να αντικατασταθούν οι αποθηκευμένες ρυθμίσεις του «{name}» με τις τρέχουσες;",
+                    parent=parent.winfo_toplevel()):
+                return
+            save_template_values(name, current_data())
+            preview_status.config(text=f"Ενημερώθηκε το template «{name}»")
+
+        def load_template():
+            name = preset_var.get()
+            values = saved_templates.get(name)
+            if not isinstance(values, dict):
+                messagebox.showinfo("Templates", "Επίλεξε αποθηκευμένο template.",
+                                    parent=parent.winfo_toplevel())
+                return
+            populate_design_fields(values)
+            preview_status.config(text=f"Άνοιξε το template «{name}»")
+
+        def refresh_template_buttons(*_):
+            active = preset_var.get() in saved_templates
+            update_template_button.config(state="normal" if active else "disabled")
+            open_template_button.config(state="normal" if active else "disabled")
+
+        preset_var.trace_add("write", refresh_template_buttons)
+        refresh_template_buttons()
 
         def apply_design_to(indices, status_text):
             values = current_data()
@@ -763,39 +766,11 @@ class PresentationMixin:
         def apply_design_selected():
             selected = set(getattr(self, "selected_indices", set()))
             selected.add(idx)
-            apply_design_to(selected, "Πλήρες σχέδιο εφαρμόστηκε σε {count} επιλεγμένα media")
+            apply_design_to(selected, "Σχέδιο εφαρμόστηκε σε {count} επιλεγμένα media")
 
         def apply_design_all():
             apply_design_to(range(len(self.media_files)),
-                            "Πλήρες σχέδιο εφαρμόστηκε σε {count} media")
-
-        def apply_template_to(indices):
-            template = current_data()["template"]
-            changed = 0
-            for selected_idx in sorted(set(indices)):
-                if not 0 <= selected_idx < len(self.media_files):
-                    continue
-                target = self.media_files[selected_idx][2]
-                current = normalize_presentation(target.get("presentation"))
-                if current["template"] == template:
-                    continue
-                current["template"] = template
-                target["presentation"] = normalize_presentation(
-                    current, scene_id=current["scene_id"])
-                changed += 1
-            if changed:
-                self.is_modified = True
-                self.update_media_display()
-                self._schedule_preview()
-            preview_status.config(text=f"Template εφαρμόστηκε σε {changed} slide(s) — το κείμενο διατηρήθηκε")
-
-        def apply_template_selected():
-            selected = set(getattr(self, "selected_indices", set()))
-            selected.add(idx)
-            apply_template_to(selected)
-
-        def apply_template_all():
-            apply_template_to(range(len(self.media_files)))
+                            "Σχέδιο εφαρμόστηκε σε {count} media")
 
         def apply_current():
             values = current_data()

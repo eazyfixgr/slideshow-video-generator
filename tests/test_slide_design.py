@@ -19,6 +19,7 @@ from slideshow.export import ExportMixin
 from slideshow.render import RenderMixin
 from slideshow.app import SlideshowApp
 from slideshow.deps import np
+from slideshow.design_templates import read_design_templates, write_design_templates
 
 
 class PresentationModelTests(unittest.TestCase):
@@ -110,14 +111,27 @@ class PresentationModelTests(unittest.TestCase):
         short = ExportMixin.facebook_video_bitrate(95, 120)
         long = ExportMixin.facebook_video_bitrate(95, 480)
         self.assertGreater(short, long)
-        self.assertGreaterEqual(long, 64_000)
+        self.assertGreaterEqual(long, 16_000)
         self.assertLess(long, 2_000_000)
+        self.assertAlmostEqual(long + 128_000, 95_000_000 * 8 / 480, delta=1)
         exporter = object.__new__(ExportMixin)
         exporter.settings = {"export_quality": "facebook"}
         exporter._export_video_bitrate = long
         options = exporter.video_encode_options()
         self.assertIn("-maxrate", options)
         self.assertNotIn("-crf", options)
+
+    def test_named_design_templates_migrate_old_presets(self):
+        settings = {"slide_design_presets": {
+            "My Navy": {"template": "real_estate", "featured_text": "FOR SALE",
+                         "text_align": "right"},
+        }}
+        templates = read_design_templates(settings)
+        self.assertEqual(templates["My Navy"]["template"], "navy_gold")
+        self.assertEqual(templates["My Navy"]["featured_text"], "FOR SALE")
+        self.assertEqual(templates["My Navy"]["text_align"], "right")
+        write_design_templates(settings, templates)
+        self.assertIn("My Navy", settings["slide_design_templates"])
 
     def test_project_template_is_inherited_unless_slide_overrides_it(self):
         class ProjectRenderer(RenderMixin):
