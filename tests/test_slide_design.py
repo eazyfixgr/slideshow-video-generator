@@ -276,6 +276,7 @@ class TemplateRendererTests(unittest.TestCase):
         self.assertEqual(TEMPLATES["legacy"], "Απλό")
         self.assertEqual(TEMPLATES["cinematic"], "Υπότιτλος")
         self.assertEqual(TEMPLATES["lower_third"], "Navy & Gold Transparent")
+        self.assertEqual(normalize_presentation({"template": "navy_gold"})["font_size"], 90)
         for removed in ("real_estate", "split_editorial", "business_service", "before_after"):
             self.assertNotIn(removed, TEMPLATES)
             self.assertEqual(normalize_presentation({"template": removed})["template"],

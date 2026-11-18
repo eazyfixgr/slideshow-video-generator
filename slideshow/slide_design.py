@@ -65,7 +65,7 @@ DEFAULT_PRESENTATION = {
     "text_position": "bottom",
     "text_align": "left",
     "font_family": "",
-    "font_size": 0,
+    "font_size": 90,
     "text_color": "#FFFFFF",
     "panel_color": "#111B2B",
     "accent_color": "#D6B86A",
@@ -605,7 +605,8 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
     family = p.get("font_family") or "Calibri"
     min_side = min(draw._image.size) if getattr(draw, "_image", None) else min(bw, bh)
     auto_title = max(22, min(96, int(min_side * 0.065)))
-    title_size = p["font_size"] or auto_title
+    title_size = (max(9, round(p["font_size"] * min_side / 1080))
+                  if p["font_size"] else auto_title)
     title = fields.get("title", "") or ""
     subtitle = fields.get("subtitle", "") or ""
     description = fields.get("description", "") or ""

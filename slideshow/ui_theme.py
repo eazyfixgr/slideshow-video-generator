@@ -83,11 +83,24 @@ class ThemeMixin:
                   foreground=[("pressed", "#17181b")])
         style.configure("TEntry", fieldbackground=p["field"], foreground=p["text"],
                         insertcolor=p["text"], bordercolor=p["border"])
+        style.configure("TSpinbox", background=p["panel"], fieldbackground=p["field"],
+                        foreground=p["text"], arrowcolor=p["text"],
+                        insertcolor=p["text"], bordercolor=p["border"])
+        style.map("TSpinbox", fieldbackground=[("readonly", p["field"]),
+                                                ("disabled", p["panel"])],
+                  foreground=[("readonly", p["text"]), ("disabled", p["muted"])],
+                  arrowcolor=[("disabled", p["muted"]), ("pressed", p["accent"]),
+                              ("active", p["text"])])
         style.configure("TCombobox", fieldbackground=p["field"], foreground=p["text"],
                         arrowcolor=p["text"], bordercolor=p["border"])
         style.map("TCombobox", fieldbackground=[("readonly", p["field"])],
                   foreground=[("readonly", p["text"])])
-        style.configure("TCheckbutton", background=p["background"], foreground=p["text"])
+        style.configure("TCheckbutton", background=p["background"], foreground=p["text"],
+                         indicatorcolor=p["field"])
+        style.map("TCheckbutton", background=[("active", p["selected"])],
+                  foreground=[("disabled", p["muted"]), ("active", p["text"])],
+                  indicatorcolor=[("disabled", p["panel"]), ("pressed", p["accent"]),
+                                  ("selected", p["accent"]), ("active", p["field"])])
         style.configure("TRadiobutton", background=p["background"], foreground=p["text"])
         style.configure("TNotebook", background=p["background"], borderwidth=0)
         style.configure("TNotebook.Tab", background=p["panel"], foreground=p["muted"],
