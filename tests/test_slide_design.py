@@ -359,6 +359,15 @@ class TemplateRendererTests(unittest.TestCase):
         self.assertEqual(panel.getpixel((1, 100)), (17, 27, 43))
         self.assertEqual(blur.getpixel((1, 100)), (208, 32, 48))
 
+    def test_auto_position_video_starts_at_top_of_media_area(self):
+        source = Image.new("RGB", (560, 320), "#D02030")
+        presentation = normalize_presentation({"template": "navy_gold", "mode": "custom"})
+        frame, _ = compose_design_frame(
+            source, 360, 640, presentation, {}, auto_position_video=True,
+            video_fill_mode="panel")
+        self.assertEqual(frame.getpixel((180, 20)), (208, 32, 48))
+        self.assertEqual(frame.getpixel((180, 300)), (17, 27, 43))
+
     def test_legacy_template_alignment_defaults_left_and_can_be_changed(self):
         class ClassicRenderer(RenderMixin):
             settings = {"font_size": 24, "font_family": "Arial", "text_style": "black_box"}

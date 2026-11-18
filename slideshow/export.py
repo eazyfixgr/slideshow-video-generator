@@ -272,7 +272,7 @@ class ExportMixin(ExportQualityMixin):
                         if auto_position_video:
                             size_part = (f"scale={rw}:{rh}:force_original_aspect_ratio=decrease,"
                                          "setsar=1,format=rgba")
-                            overlay_position = f"{x}+(W-w)/2:{y}+(H-h)/2"
+                            overlay_position = f"{x}+(W-w)/2:{y}"
                         else:
                             size_part = (f"scale={rw}:{rh}:force_original_aspect_ratio=increase,"
                                          f"crop={rw}:{rh},setsar=1,format=rgba")

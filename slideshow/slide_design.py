@@ -738,7 +738,8 @@ def compose_design_frame(source, width, height, presentation, fields, before_ima
         fitted = (_contain_image(source, (rw, rh)) if auto_position_video else
                   _fit_image(source, (rw, rh)))
         px = x + max(0, (rw - fitted.width) // 2)
-        py = y + max(0, (rh - fitted.height) // 2)
+        py = (y if auto_position_video else
+              y + max(0, (rh - fitted.height) // 2))
         result.paste(fitted, (px, py))
     result = Image.alpha_composite(result.convert("RGBA"), overlay).convert("RGB")
     return result, overflow
