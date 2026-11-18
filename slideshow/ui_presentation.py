@@ -12,7 +12,8 @@ from .slide_design import (DEFAULT_PRESENTATION, DESIGN_FIELDS, TEMPLATES, compo
                            INHERIT_TEMPLATE, INHERIT_TEMPLATE_LABEL,
                            has_presentation_settings, normalize_presentation,
                            normalize_template, presentation_fields)
-from .design_templates import read_design_templates, write_design_templates
+from .design_templates import (design_template_choices, read_design_templates,
+                               write_design_templates)
 
 
 MODE_LABELS = {
@@ -294,6 +295,13 @@ class PresentationMixin:
         add_entry("Τηλέφωνο", "phone", parent_frame=advanced_frame)
         add_entry("Ιστότοπος", "website", parent_frame=advanced_frame)
 
+        saved_templates = read_design_templates(self.settings)
+        reserved_template_names = {INHERIT_TEMPLATE_LABEL, *TEMPLATES.values()}
+
+        def template_choices():
+            return design_template_choices(
+                saved_templates, TEMPLATES.values(), INHERIT_TEMPLATE_LABEL)
+
         ttk.Separator(form).pack(fill="x", padx=8, pady=6)
         template_row = ttk.Frame(form)
         template_row.pack(fill="x", padx=8, pady=3)
@@ -301,8 +309,9 @@ class PresentationMixin:
         template_label = (INHERIT_TEMPLATE_LABEL if draft["template"] == INHERIT_TEMPLATE
                           else TEMPLATES.get(draft["template"], TEMPLATES["legacy"]))
         template_var = tk.StringVar(value=template_label)
-        ttk.Combobox(template_row, textvariable=template_var, state="readonly",
-                     values=[INHERIT_TEMPLATE_LABEL, *TEMPLATES.values()]).pack(
+        template_combo = ttk.Combobox(template_row, textvariable=template_var, state="readonly",
+                                      values=template_choices())
+        template_combo.pack(
             side="left", fill="x", expand=True)
         template_var.trace_add("write", schedule_preview)
 
@@ -320,10 +329,14 @@ class PresentationMixin:
                   foreground="#666").pack(anchor="w", padx=8)
 
         def selected_template_key():
-            if template_var.get() == INHERIT_TEMPLATE_LABEL:
+            selected = template_var.get()
+            if selected == INHERIT_TEMPLATE_LABEL:
                 return self.project_template
+            if selected in saved_templates:
+                selected = normalize_presentation(saved_templates[selected])["template"]
+                return self.project_template if selected == INHERIT_TEMPLATE else selected
             return next((key for key, label in TEMPLATES.items()
-                         if label == template_var.get()), "legacy")
+                         if label == selected), "legacy")
 
         def update_featured_controls(*_):
             active = selected_template_key() == "navy_gold"
@@ -336,19 +349,6 @@ class PresentationMixin:
         featured_text_var.trace_add("write", schedule_preview)
         template_var.trace_add("write", update_featured_controls)
         update_featured_controls()
-
-        preset_row = ttk.Frame(form)
-        preset_row.pack(fill="x", padx=8, pady=3)
-        ttk.Label(preset_row, text="Αποθηκευμένο template", width=17).pack(side="left")
-        preset_var = tk.StringVar()
-        saved_templates = read_design_templates(self.settings)
-        preset_combo = ttk.Combobox(
-            preset_row, textvariable=preset_var, state="readonly",
-            values=sorted(saved_templates.keys()))
-        preset_combo.pack(side="left", fill="x", expand=True)
-        open_template_button = ttk.Button(
-            preset_row, text="Άνοιγμα", command=lambda: load_template(), state="disabled")
-        open_template_button.pack(side="left", padx=4)
 
         duration_row = ttk.Frame(form)
         duration_row.pack(fill="x", padx=8, pady=4)
@@ -531,9 +531,15 @@ class PresentationMixin:
                     values[key] = var.get()
             for key, widget in text_widgets.items():
                 values[key] = widget.get("1.0", "end-1c")
-            values["template"] = (INHERIT_TEMPLATE if template_var.get() == INHERIT_TEMPLATE_LABEL
-                                   else next((k for k, v in TEMPLATES.items()
-                                              if v == template_var.get()), "legacy"))
+            selected_template = template_var.get()
+            if selected_template == INHERIT_TEMPLATE_LABEL:
+                values["template"] = INHERIT_TEMPLATE
+            elif selected_template in saved_templates:
+                values["template"] = normalize_presentation(
+                    saved_templates[selected_template])["template"]
+            else:
+                values["template"] = next((key for key, label in TEMPLATES.items()
+                                            if label == selected_template), "legacy")
             values["text_position"] = POSITION_LABELS.get(position_var.get(), "bottom")
             values["text_align"] = ALIGNMENT_LABELS.get(alignment_var.get(), "left")
             values["featured_enabled"] = featured_enabled_var.get()
@@ -634,13 +640,14 @@ class PresentationMixin:
                     self._post_ui(preview_status.config, text=f"Preview error: {error}")
             threading.Thread(target=worker, daemon=True).start()
 
-        def populate_design_fields(values):
+        def populate_design_fields(values, template_display=None):
             values = normalize_presentation(values)
             for key in DESIGN_KEYS:
                 value = copy.deepcopy(values[key])
                 if key == "template":
-                    template_var.set(INHERIT_TEMPLATE_LABEL if value == INHERIT_TEMPLATE else
-                                     TEMPLATES[normalize_template(value)])
+                    template_var.set(template_display or (
+                        INHERIT_TEMPLATE_LABEL if value == INHERIT_TEMPLATE else
+                        TEMPLATES[normalize_template(value)]))
                 elif key == "text_position":
                     position_var.set(next((label for label, item in POSITION_LABELS.items()
                                            if item == value), "Κάτω"))
@@ -679,10 +686,19 @@ class PresentationMixin:
                     draft["motion"] = value
             schedule_preview()
 
+        def apply_selected_template(_event=None):
+            name = template_var.get()
+            if name in saved_templates:
+                populate_design_fields(saved_templates[name], template_display=name)
+            else:
+                schedule_preview()
+
+        template_combo.bind("<<ComboboxSelected>>", apply_selected_template, add="+")
+
         def reset_design():
-            selected_name = preset_var.get()
+            selected_name = template_var.get()
             if selected_name in saved_templates:
-                load_template()
+                populate_design_fields(saved_templates[selected_name], template_display=selected_name)
                 preview_status.config(text=f"Το template «{selected_name}» επανήλθε στις αποθηκευμένες ρυθμίσεις")
                 return
             selected_template = (INHERIT_TEMPLATE if template_var.get() == INHERIT_TEMPLATE_LABEL else
@@ -697,8 +713,7 @@ class PresentationMixin:
             stored = write_design_templates(self.settings, saved_templates)
             saved_templates.clear()
             saved_templates.update(stored)
-            preset_combo.configure(values=sorted(saved_templates))
-            preset_var.set(name)
+            template_combo.configure(values=template_choices())
             self.save_settings()
             refresh_template_buttons()
 
@@ -709,15 +724,20 @@ class PresentationMixin:
             if not name or not name.strip():
                 return
             name = name.strip()
+            if name in reserved_template_names:
+                messagebox.showerror(
+                    "Μη διαθέσιμο όνομα", "Το όνομα χρησιμοποιείται ήδη από ενσωματωμένο template.",
+                    parent=parent.winfo_toplevel())
+                return
             if name in saved_templates and not messagebox.askyesno(
                     "Template υπάρχει ήδη", f"Να αντικατασταθεί το template «{name}»;",
                     parent=parent.winfo_toplevel()):
                 return
             save_template_values(name, current_data())
-            preview_status.config(text=f"Δημιουργήθηκε το template «{name}»")
+            preview_status.config(text=f"Το template «{name}» προστέθηκε στη λίστα Template")
 
         def update_template():
-            name = preset_var.get()
+            name = template_var.get()
             if name not in saved_templates:
                 messagebox.showinfo("Ενημέρωση template", "Άνοιξε πρώτα ένα αποθηκευμένο template.",
                                     parent=parent.winfo_toplevel())
@@ -730,22 +750,11 @@ class PresentationMixin:
             save_template_values(name, current_data())
             preview_status.config(text=f"Ενημερώθηκε το template «{name}»")
 
-        def load_template():
-            name = preset_var.get()
-            values = saved_templates.get(name)
-            if not isinstance(values, dict):
-                messagebox.showinfo("Templates", "Επίλεξε αποθηκευμένο template.",
-                                    parent=parent.winfo_toplevel())
-                return
-            populate_design_fields(values)
-            preview_status.config(text=f"Άνοιξε το template «{name}»")
-
         def refresh_template_buttons(*_):
-            active = preset_var.get() in saved_templates
+            active = template_var.get() in saved_templates
             update_template_button.config(state="normal" if active else "disabled")
-            open_template_button.config(state="normal" if active else "disabled")
 
-        preset_var.trace_add("write", refresh_template_buttons)
+        template_var.trace_add("write", refresh_template_buttons)
         refresh_template_buttons()
 
         def apply_design_to(indices, status_text):

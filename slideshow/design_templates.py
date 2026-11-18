@@ -20,6 +20,16 @@ def read_design_templates(settings):
     }
 
 
+def design_template_choices(saved_templates, builtin_labels, inherit_label):
+    """Keep built-in templates first, then append named user templates."""
+    builtin_labels = list(builtin_labels)
+    reserved = set(builtin_labels)
+    reserved.add(inherit_label)
+    custom = sorted(name for name in saved_templates
+                    if isinstance(name, str) and name not in reserved)
+    return [inherit_label, *builtin_labels, *custom]
+
+
 def write_design_templates(settings, templates):
     """Save validated user-created templates without touching older settings."""
     cleaned = {}

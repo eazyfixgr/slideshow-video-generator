@@ -19,7 +19,8 @@ from slideshow.export import ExportMixin
 from slideshow.render import RenderMixin
 from slideshow.app import SlideshowApp
 from slideshow.deps import np
-from slideshow.design_templates import read_design_templates, write_design_templates
+from slideshow.design_templates import (design_template_choices, read_design_templates,
+                                        write_design_templates)
 
 
 class PresentationModelTests(unittest.TestCase):
@@ -132,6 +133,13 @@ class PresentationModelTests(unittest.TestCase):
         self.assertEqual(templates["My Navy"]["text_align"], "right")
         write_design_templates(settings, templates)
         self.assertIn("My Navy", settings["slide_design_templates"])
+
+    def test_custom_design_templates_are_listed_after_builtins(self):
+        choices = design_template_choices(
+            {"Zulu": {}, "Elegant Navy & Gold": {}, "Amber": {}},
+            ["Απλό", "Elegant Navy & Gold", "Υπότιτλος"], "Use Project Default")
+        self.assertEqual(choices, ["Use Project Default", "Απλό", "Elegant Navy & Gold",
+                                   "Υπότιτλος", "Amber", "Zulu"])
 
     def test_project_template_is_inherited_unless_slide_overrides_it(self):
         class ProjectRenderer(RenderMixin):
