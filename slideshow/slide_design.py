@@ -70,7 +70,7 @@ DEFAULT_PRESENTATION = {
     "panel_color": "#111B2B",
     "accent_color": "#D6B86A",
     "panel_style": "solid",
-    "featured_enabled": True,
+    "featured_enabled": False,
     "featured_text": "FEATURED",
     "duration": None,
     "logo_enabled": False,

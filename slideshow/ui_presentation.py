@@ -309,7 +309,7 @@ class PresentationMixin:
         featured_row = ttk.Frame(form)
         featured_row.pack(fill="x", padx=8, pady=3)
         featured_enabled_var = tk.BooleanVar(value=draft["featured_enabled"])
-        featured_check = ttk.Checkbutton(featured_row, text="Εμφάνιση Featured badge",
+        featured_check = ttk.Checkbutton(featured_row, text="Εμφάνιση badge",
                                          variable=featured_enabled_var)
         featured_check.pack(side="left")
         featured_text_var = tk.StringVar(value=draft["featured_text"])

@@ -281,10 +281,11 @@ class TemplateRendererTests(unittest.TestCase):
             self.assertEqual(normalize_presentation({"template": removed})["template"],
                              "navy_gold")
         old_real_estate = normalize_presentation({"template": "real_estate"})
-        self.assertTrue(old_real_estate["featured_enabled"])
+        self.assertFalse(old_real_estate["featured_enabled"])
         self.assertEqual(old_real_estate["featured_text"], "PROPERTY")
         self.assertEqual(old_real_estate["text_position"], "bottom")
         self.assertEqual(old_real_estate["text_align"], "left")
+        self.assertFalse(normalize_presentation({"template": "navy_gold"})["featured_enabled"])
         self.assertFalse(normalize_presentation({
             "template": "business_service"})["featured_enabled"])
         self.assertEqual(normalize_presentation({
