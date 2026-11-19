@@ -8,8 +8,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 from .deps import Image, ImageTk
-from .slide_design import (DEFAULT_PRESENTATION, DESIGN_FIELDS, INHERIT_TEMPLATE,
-                           INHERIT_TEMPLATE_LABEL, TEMPLATES, normalize_presentation)
+from .slide_design import (DESIGN_FIELDS, INHERIT_TEMPLATE, INHERIT_TEMPLATE_LABEL,
+                           TEMPLATES, normalize_presentation)
 from .design_templates import read_design_templates
 
 
@@ -105,7 +105,8 @@ class MediaCaptionMixin:
         media = [(index, path, edit) for index, (kind, path, edit) in enumerate(self.media_files)
                  if kind == media_type]
         default_mode = ("individual" if any(
-            normalize_presentation(edit.get("presentation"))["mode"] in ("custom", "combine")
+            normalize_presentation(edit.get("presentation"), project_template=self.project_template)["mode"]
+            in ("custom", "combine")
             for _index, _path, edit in media) else "shared")
         mode_labels = {
             "Κοινό caption για όλα τα video" if media_type == "video" else
@@ -136,7 +137,8 @@ class MediaCaptionMixin:
         style_row.columnconfigure(1, weight=1)
         ttk.Label(style_row, text="Στυλ slides", font=("Calibri", 10, "bold")).grid(
             row=0, column=0, sticky="w", padx=(0, 8))
-        initial_template = (normalize_presentation(media[0][2].get("presentation"))["template"]
+        initial_template = (normalize_presentation(
+            media[0][2].get("presentation"), project_template=self.project_template)["template"]
                             if media else INHERIT_TEMPLATE)
         initial_style_label = (INHERIT_TEMPLATE_LABEL if initial_template == INHERIT_TEMPLATE else
                                TEMPLATES.get(initial_template, TEMPLATES["legacy"]))
@@ -304,11 +306,13 @@ class MediaCaptionMixin:
             if not 0 <= index < len(self.media_files):
                 return
             edit = self.media_files[index][2]
-            presentation = normalize_presentation(edit.get("presentation"))
+            presentation = normalize_presentation(
+                edit.get("presentation"), project_template=self.project_template)
             presentation["mode"] = "custom"
             presentation.update(values)
             edit["presentation"] = normalize_presentation(
-                presentation, scene_id=presentation["scene_id"])
+                presentation, scene_id=presentation["scene_id"],
+                project_template=self.project_template)
             self.is_modified = True
 
         def save_current():
@@ -323,7 +327,9 @@ class MediaCaptionMixin:
             if not 0 <= index < len(self.media_files):
                 return
             state["loading"] = True
-            presentation = normalize_presentation(self.media_files[index][2].get("presentation"))
+            presentation = normalize_presentation(
+                self.media_files[index][2].get("presentation"),
+                project_template=self.project_template)
             title_var.set(presentation["title"])
             subtitle_var.set(presentation["subtitle"])
             caption_description = presentation["description"]
@@ -381,7 +387,8 @@ class MediaCaptionMixin:
                     return
                 index = selected_indices[0]
                 edit_override = copy.deepcopy(self.media_files[index][2])
-                presentation = normalize_presentation(edit_override.get("presentation"))
+                presentation = normalize_presentation(
+                    edit_override.get("presentation"), project_template=self.project_template)
                 presentation["mode"] = "custom"
                 presentation.update(caption_values())
                 edit_override["presentation"] = presentation
@@ -389,7 +396,8 @@ class MediaCaptionMixin:
                 index = selected_indices[0] if selected_indices else (media[0][0] if media else None)
                 edit_override = copy.deepcopy(self.media_files[index][2]) if index is not None else None
                 if edit_override is not None:
-                    presentation = normalize_presentation(edit_override.get("presentation"))
+                    presentation = normalize_presentation(
+                        edit_override.get("presentation"), project_template=self.project_template)
                     presentation["mode"] = "global"
                     edit_override["presentation"] = presentation
             if index is None:
@@ -510,17 +518,21 @@ class MediaCaptionMixin:
                             "featured_enabled", "featured_text")
             for index in indices:
                 edit = self.media_files[index][2]
-                presentation = normalize_presentation(edit.get("presentation"))
+                presentation = normalize_presentation(
+                    edit.get("presentation"), project_template=self.project_template)
                 if kind == "custom":
                     template_data = custom_templates[value]
                     for field in DESIGN_FIELDS:
                         presentation[field] = copy.deepcopy(template_data[field])
                 else:
                     presentation["template"] = value
+                    template_defaults = normalize_presentation(
+                        {"template": value}, project_template=self.project_template)
                     for field in reset_fields:
-                        presentation[field] = copy.deepcopy(DEFAULT_PRESENTATION[field])
+                        presentation[field] = copy.deepcopy(template_defaults[field])
                 edit["presentation"] = normalize_presentation(
-                    presentation, scene_id=presentation["scene_id"])
+                    presentation, scene_id=presentation["scene_id"],
+                    project_template=self.project_template)
             self.is_modified = True
             self.update_media_display()
             self._schedule_preview()
@@ -543,7 +555,8 @@ class MediaCaptionMixin:
         def apply_shared_to_all():
             sync_shared_text(force=True)
             for index, _path, edit in media:
-                presentation = normalize_presentation(edit.get("presentation"))
+                presentation = normalize_presentation(
+                    edit.get("presentation"), project_template=self.project_template)
                 presentation["mode"] = "global"
                 edit["presentation"] = presentation
             self.is_modified = True

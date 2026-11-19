@@ -87,7 +87,8 @@ class RenderMixin:
 
 
     def _effective_presentation(self, value):
-        presentation = normalize_presentation(value)
+        project_template = getattr(self, "project_template", "legacy")
+        presentation = normalize_presentation(value, project_template=project_template)
         if presentation["template"] == "project":
             default = getattr(self, "project_template", "legacy")
             presentation["template"] = (default if isinstance(default, str) and default in TEMPLATES

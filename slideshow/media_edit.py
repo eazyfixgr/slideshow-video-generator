@@ -25,8 +25,8 @@ class MediaEditMixin:
     """Per-media, non-destructive edit data: crop / brightness / colour / trim."""
 
     @staticmethod
-    def default_edit(m_type):
-        presentation = normalize_presentation()
+    def default_edit(m_type, project_template=None):
+        presentation = normalize_presentation(project_template=project_template)
         # "rotate" is the clockwise rotation in degrees (0/90/180/270), applied
         # before crop and erase so every stored coordinate is in that orientation.
         if m_type == "image":
@@ -44,32 +44,35 @@ class MediaEditMixin:
 
 
     @classmethod
-    def normalize_item(cls, item):
+    def normalize_item(cls, item, project_template=None):
         """Return a (type, path, edit) tuple from old or new project data."""
         if not isinstance(item, (list, tuple)) or len(item) < 2:
             return None
         m_type, path = item[0], item[1]
         edit = item[2] if len(item) > 2 and isinstance(item[2], dict) else {}
-        base = dict(cls.default_edit(m_type))
+        base = dict(cls.default_edit(m_type, project_template=project_template))
         base.update(edit)
         base["presentation"] = normalize_presentation(
-            edit.get("presentation"), scene_id=(base.get("presentation") or {}).get("scene_id"))
+            edit.get("presentation"), scene_id=(base.get("presentation") or {}).get("scene_id"),
+            project_template=project_template)
         return (m_type, path, base)
 
     def _new_item(self, m_type, path):
-        return (m_type, path, self.default_edit(m_type))
+        return (m_type, path, self.default_edit(
+            m_type, project_template=getattr(self, "project_template", None)))
 
 
-    @staticmethod
-    def item_presentation(edit):
+    def item_presentation(self, edit):
         """Return validated per-item presentation settings."""
-        return normalize_presentation((edit or {}).get("presentation"))
+        return normalize_presentation((edit or {}).get("presentation"),
+                                      project_template=getattr(self, "project_template", None))
 
 
     def normalize_media_list(self, items):
         out = []
         for it in items or []:
-            norm = self.normalize_item(it)
+            norm = self.normalize_item(
+                it, project_template=getattr(self, "project_template", None))
             if norm is not None:
                 out.append(norm)
         return out

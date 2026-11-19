@@ -67,6 +67,15 @@ class PresentationModelTests(unittest.TestCase):
             "project_template": "cinematic",
         }), "navy_gold")
 
+    def test_new_media_uses_template_specific_font_default(self):
+        app = object.__new__(SlideshowApp)
+        app.project_template = "navy_gold"
+        _kind, _path, edit = app._new_item("image", "photo.png")
+        self.assertEqual(edit["presentation"]["font_size"], 85)
+        app.project_template = "cinematic"
+        _kind, _path, edit = app._new_item("image", "photo.png")
+        self.assertEqual(edit["presentation"]["font_size"], 90)
+
     def test_first_legacy_project_template_becomes_shared_default(self):
         app = object.__new__(SlideshowApp)
         app.settings = {
@@ -383,7 +392,11 @@ class TemplateRendererTests(unittest.TestCase):
         self.assertEqual(TEMPLATES["legacy"], "Απλό")
         self.assertEqual(TEMPLATES["cinematic"], "Υπότιτλος")
         self.assertEqual(TEMPLATES["lower_third"], "Navy & Gold Transparent")
-        self.assertEqual(normalize_presentation({"template": "navy_gold"})["font_size"], 90)
+        self.assertEqual(normalize_presentation({"template": "navy_gold"})["font_size"], 85)
+        self.assertEqual(normalize_presentation({"template": "cinematic"})["font_size"], 90)
+        self.assertEqual(normalize_presentation(
+            {"template": "navy_gold", "font_size": 90})["font_size"], 90)
+        self.assertEqual(normalize_presentation(project_template="navy_gold")["font_size"], 85)
         for removed in ("real_estate", "split_editorial", "business_service", "before_after"):
             self.assertNotIn(removed, TEMPLATES)
             self.assertEqual(normalize_presentation({"template": removed})["template"],

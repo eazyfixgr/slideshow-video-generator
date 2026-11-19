@@ -5,8 +5,7 @@ import copy
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
-from .slide_design import (DEFAULT_PRESENTATION, INHERIT_TEMPLATE, TEMPLATES,
-                           normalize_presentation)
+from .slide_design import INHERIT_TEMPLATE, TEMPLATES, normalize_presentation
 from .ui_caption_media import MediaCaptionMixin
 
 
@@ -247,16 +246,18 @@ class CaptionsMixin(MediaCaptionMixin):
             changed = template != self.project_template
             self.project_template = template
             self._remember_caption_template(template)
+            project_defaults = normalize_presentation(project_template=template)
             style_fields = ("text_position", "text_align", "font_family", "font_size",
                             "text_color", "panel_color", "accent_color", "panel_style",
                             "featured_enabled", "featured_text")
             for _kind, _path, edit in self.media_files:
-                presentation = normalize_presentation(edit.get("presentation"))
+                presentation = normalize_presentation(
+                    edit.get("presentation"), project_template=template)
                 if presentation["template"] != INHERIT_TEMPLATE:
                     presentation["template"] = INHERIT_TEMPLATE
                     changed = True
                 for field in style_fields:
-                    default_value = DEFAULT_PRESENTATION[field]
+                    default_value = project_defaults[field]
                     if presentation[field] != default_value:
                         presentation[field] = copy.deepcopy(default_value)
                         changed = True
@@ -319,7 +320,8 @@ class CaptionsMixin(MediaCaptionMixin):
             sync_project_caption(force=True)
             self.project_caption_mode = "all"
             for _kind, _path, edit in self.media_files:
-                presentation = normalize_presentation(edit.get("presentation"))
+                presentation = normalize_presentation(
+                    edit.get("presentation"), project_template=self.project_template)
                 presentation["mode"] = "global"
                 edit["presentation"] = presentation
             self.project_text_videos = self.project_text_all

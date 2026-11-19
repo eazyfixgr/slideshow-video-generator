@@ -177,7 +177,8 @@ class PresentationMixin:
         if not (0 <= idx < len(self.media_files)):
             return
         edit = self.media_files[idx][2]
-        original = normalize_presentation(edit.get("presentation"))
+        original = normalize_presentation(
+            edit.get("presentation"), project_template=self.project_template)
         draft = copy.deepcopy(original)
 
         container = ttk.Frame(parent)
@@ -706,7 +707,8 @@ class PresentationMixin:
                                  next((key for key, label in TEMPLATES.items()
                                        if label == template_var.get()), "legacy"))
             fresh = normalize_presentation({"scene_id": original["scene_id"],
-                                            "template": selected_template})
+                                            "template": selected_template},
+                                           project_template=self.project_template)
             populate_design_fields(fresh)
 
         def save_template_values(name, values):
@@ -765,7 +767,8 @@ class PresentationMixin:
                 if not 0 <= selected_idx < len(self.media_files):
                     continue
                 target = self.media_files[selected_idx][2]
-                current = normalize_presentation(target.get("presentation"))
+                current = normalize_presentation(
+                    target.get("presentation"), project_template=self.project_template)
                 for key in DESIGN_KEYS:
                     current[key] = copy.deepcopy(values[key])
                 target["presentation"] = normalize_presentation(current,
@@ -789,7 +792,8 @@ class PresentationMixin:
         def apply_current():
             values = current_data()
             target = self.media_files[idx][2]
-            if normalize_presentation(target.get("presentation")) == values:
+            if normalize_presentation(target.get("presentation"),
+                                      project_template=self.project_template) == values:
                 self._clear_presentation_preview_draft(original["scene_id"])
                 preview_status.config(text="Δεν υπάρχουν αλλαγές στο slide")
                 return

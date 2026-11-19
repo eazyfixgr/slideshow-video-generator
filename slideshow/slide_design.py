@@ -95,7 +95,7 @@ _TRANSITIONS = {"global", "none", "fade", "fadeblack", "fadewhite", "wipeleft",
                 "wiperight", "wipeup", "wipedown", "smoothleft", "smoothright"}
 
 
-def normalize_presentation(value=None, scene_id=None):
+def normalize_presentation(value=None, scene_id=None, project_template=None):
     """Return validated presentation data, preserving unknown future fields."""
     data = dict(DEFAULT_PRESENTATION)
     source = value if isinstance(value, dict) else {}
@@ -105,6 +105,12 @@ def normalize_presentation(value=None, scene_id=None):
         data["mode"] = "global"
     old_template = source.get("template")
     data["template"] = normalize_template(data.get("template"), INHERIT_TEMPLATE)
+    if "font_size" not in source:
+        default_template = data["template"]
+        if default_template == INHERIT_TEMPLATE and project_template:
+            default_template = normalize_template(project_template)
+        if default_template == "navy_gold":
+            data["font_size"] = 85
     if old_template == "real_estate" and "featured_text" not in source:
         data["featured_text"] = str(source.get("category") or "PROPERTY")
     elif (isinstance(old_template, str) and old_template in TEMPLATE_ALIASES and
