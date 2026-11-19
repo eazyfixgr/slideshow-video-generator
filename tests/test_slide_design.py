@@ -24,18 +24,23 @@ from slideshow.design_templates import (design_template_choices, read_design_tem
 
 
 class PresentationModelTests(unittest.TestCase):
-    def test_saved_main_window_height_is_raised_to_new_default(self):
+    def test_main_window_starts_maximized_and_keeps_saved_geometry(self):
         class Root:
             geometry_value = None
+            state_value = None
 
             def geometry(self, value):
                 self.geometry_value = value
+
+            def state(self, value):
+                self.state_value = value
 
         app = object.__new__(SlideshowApp)
         app.root = Root()
         app.settings = {"window_geometry": "1550x950+10+20"}
         app._restore_window_state()
-        self.assertEqual(app.root.geometry_value, "1550x1425+10+20")
+        self.assertEqual(app.root.geometry_value, "1550x950+10+20")
+        self.assertEqual(app.root.state_value, "zoomed")
 
     def test_legacy_project_keeps_global_text_behavior(self):
         old_project_edit = {"crop": None, "brightness": 1.0, "color": 1.0}

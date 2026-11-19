@@ -55,8 +55,6 @@ PROJECT_SETTING_KEYS = (
     "auto_position_photos", "auto_position_videos", "video_auto_position_fill",
 )
 PROJECT_RESOLUTIONS = {"1080x1080", "1920x1080", "1080x1920", "1080x1350", "720x1280"}
-MAIN_WINDOW_DEFAULT_WIDTH = 1550
-MAIN_WINDOW_DEFAULT_HEIGHT = 1425
 PROJECT_BACKGROUNDS = {"white", "black", "blur", "fit_and_move"}
 PROJECT_TRANSITIONS = {"none", "fade", "fadeblack", "fadewhite", "wipeleft", "wiperight",
                        "wipeup", "wipedown", "smoothleft", "smoothright", "random"}
@@ -68,7 +66,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
     def __init__(self, root, show_welcome=True):
         self.root = root
         self.root.title("Slideshow Video Creator Pro")
-        self.root.geometry(f"{MAIN_WINDOW_DEFAULT_WIDTH}x{MAIN_WINDOW_DEFAULT_HEIGHT}")
+        self.root.geometry("1550x950")
 
         self.app_dir = APP_DIR
         self._use_local_ffmpeg()
@@ -233,19 +231,17 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
 
 
     def _restore_window_state(self):
-        """Restore the main window size/position and the library splitter."""
+        """Restore the saved window geometry, then start maximized."""
         geo = self.settings.get("window_geometry")
         if geo:
             try:
-                match = re.fullmatch(r"(\d+)x(\d+)([+-]\d+[+-]\d+)?", geo)
-                if match:
-                    width, height = int(match.group(1)), int(match.group(2))
-                    position = match.group(3) or ""
-                    height = max(height, MAIN_WINDOW_DEFAULT_HEIGHT)
-                    geo = f"{width}x{height}{position}"
                 self.root.geometry(geo)
             except tk.TclError:
                 pass
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            pass
 
 
     def _save_window_state(self):
