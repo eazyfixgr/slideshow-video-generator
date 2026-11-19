@@ -42,6 +42,53 @@ class PresentationModelTests(unittest.TestCase):
         self.assertEqual(app.root.geometry_value, "1550x950+10+20")
         self.assertEqual(app.root.state_value, "zoomed")
 
+    def test_legacy_project_video_position_promotes_to_global_default(self):
+        app = object.__new__(SlideshowApp)
+        app.settings = {
+            "auto_position_videos": False,
+            "video_auto_position_fill": "panel",
+            "auto_position_videos_is_global": False,
+        }
+        app._migrate_global_video_position({
+            "auto_position_videos": True,
+            "video_auto_position_fill": "blur",
+        })
+        self.assertTrue(app.settings["auto_position_videos"])
+        self.assertEqual(app.settings["video_auto_position_fill"], "blur")
+        self.assertTrue(app.settings["auto_position_videos_is_global"])
+
+    def test_last_caption_template_overrides_loaded_projects_after_selection(self):
+        app = object.__new__(SlideshowApp)
+        app.settings = {
+            "last_caption_template": "navy_gold",
+            "last_caption_template_is_global": True,
+        }
+        self.assertEqual(app._resolve_project_template_default({
+            "project_template": "cinematic",
+        }), "navy_gold")
+
+    def test_first_legacy_project_template_becomes_shared_default(self):
+        app = object.__new__(SlideshowApp)
+        app.settings = {
+            "last_caption_template": "legacy",
+            "last_caption_template_is_global": False,
+        }
+        self.assertEqual(app._resolve_project_template_default({
+            "project_template": "cinematic",
+        }), "cinematic")
+        self.assertEqual(app.settings["last_caption_template"], "cinematic")
+        self.assertTrue(app.settings["last_caption_template_is_global"])
+
+    def test_project_settings_no_longer_override_global_video_position(self):
+        normalized = SlideshowApp._normalize_project_settings({
+            "auto_position_photos": True,
+            "auto_position_videos": True,
+            "video_auto_position_fill": "blur",
+        })
+        self.assertTrue(normalized["auto_position_photos"])
+        self.assertNotIn("auto_position_videos", normalized)
+        self.assertNotIn("video_auto_position_fill", normalized)
+
     def test_legacy_project_keeps_global_text_behavior(self):
         old_project_edit = {"crop": None, "brightness": 1.0, "color": 1.0}
         presentation = normalize_presentation(old_project_edit.get("presentation"))
@@ -227,7 +274,7 @@ class PresentationModelTests(unittest.TestCase):
         app.project_text_photos = ""
         self.assertEqual(app.get_text_for("image"), "")
 
-    def test_legacy_project_settings_are_not_silently_overridden(self):
+    def test_legacy_project_settings_keep_project_only_fields(self):
         self.assertEqual(SlideshowApp._normalize_project_settings({}), {})
         normalized = SlideshowApp._normalize_project_settings({
             "resolution": "invalid", "slide_duration": 999,
@@ -238,12 +285,14 @@ class PresentationModelTests(unittest.TestCase):
         self.assertEqual(normalized["transition_duration"], 0.2)
         self.assertNotIn("resolution", normalized)
         video_settings = SlideshowApp._normalize_project_settings({
+            "auto_position_photos": True,
             "auto_position_videos": True,
             "video_auto_position_fill": "blur",
             "invalid_video_fill": "blur",
         })
-        self.assertTrue(video_settings["auto_position_videos"])
-        self.assertEqual(video_settings["video_auto_position_fill"], "blur")
+        self.assertTrue(video_settings["auto_position_photos"])
+        self.assertNotIn("auto_position_videos", video_settings)
+        self.assertNotIn("video_auto_position_fill", video_settings)
         self.assertNotIn("invalid_video_fill", video_settings)
 
     def test_old_caption_text_loads_even_when_new_project_metadata_exists(self):

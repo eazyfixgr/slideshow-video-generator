@@ -392,6 +392,7 @@ class SettingsMixin:
                 "video_audio": bool(audio_var.get()),
                 "video_audio_volume_db": round(vvol_var.get(), 1)
             })
+            self.settings["auto_position_videos_is_global"] = True
             self.save_settings()
             self.update_media_display()
             dialog.destroy()

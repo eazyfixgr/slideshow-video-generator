@@ -52,7 +52,7 @@ else:
 PROJECT_SETTING_KEYS = (
     "resolution", "background_mode", "cropping", "slide_duration",
     "transition_effect", "transition_duration", "random_transitions",
-    "auto_position_photos", "auto_position_videos", "video_auto_position_fill",
+    "auto_position_photos",
 )
 PROJECT_RESOLUTIONS = {"1080x1080", "1920x1080", "1080x1920", "1080x1350", "720x1280"}
 PROJECT_BACKGROUNDS = {"white", "black", "blur", "fit_and_move"}
@@ -281,6 +281,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             "output_folder": str(self.app_dir), "slide_duration": 3,
             "export_quality": "high", "facebook_target_mb": 95,
             "last_caption_template": "legacy",
+            "last_caption_template_is_global": False,
+            "auto_position_videos_is_global": False,
             "render_live_preview": False,
             "music_folder": str(self.app_dir / "music"), "crossfade_duration": 3, "trim_silence": True,
             "transition_effect": "fade", "transition_duration": 0.7, "random_transitions": [],
@@ -382,13 +384,48 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
                 transition for transition in random_transitions
                 if isinstance(transition, str) and transition in PROJECT_TRANSITIONS and
                 transition != "random"))
-        for key in ("auto_position_photos", "auto_position_videos"):
-            if isinstance(value.get(key), bool):
-                out[key] = value[key]
-        video_fill = value.get("video_auto_position_fill")
-        if video_fill in ("panel", "blur"):
-            out["video_auto_position_fill"] = video_fill
+        if isinstance(value.get("auto_position_photos"), bool):
+            out["auto_position_photos"] = value["auto_position_photos"]
         return out
+
+
+    def _migrate_global_video_position(self, legacy_project_settings):
+        """Promote a legacy project's video-position settings to app-wide defaults."""
+        if (self.settings.get("auto_position_videos_is_global") or
+                not isinstance(legacy_project_settings, dict)):
+            return
+        found = False
+        old_enabled = legacy_project_settings.get("auto_position_videos")
+        if isinstance(old_enabled, bool):
+            found = True
+            self.settings["auto_position_videos"] = (
+                bool(self.settings.get("auto_position_videos")) or old_enabled)
+        old_fill = legacy_project_settings.get("video_auto_position_fill")
+        if old_fill in ("panel", "blur"):
+            found = True
+            if (self.settings.get("video_auto_position_fill", "panel") == "panel" and
+                    old_fill == "blur"):
+                self.settings["video_auto_position_fill"] = old_fill
+        if found:
+            self.settings["auto_position_videos_is_global"] = True
+
+
+    def _resolve_project_template_default(self, project_data):
+        """Use the remembered template across projects, migrating a legacy choice once."""
+        preferred = normalize_template(self.settings.get("last_caption_template", "legacy"))
+        global_choice = bool(self.settings.get("last_caption_template_is_global"))
+        if not global_choice and preferred != "legacy":
+            global_choice = True
+            self.settings["last_caption_template_is_global"] = True
+        if not global_choice:
+            saved_choice = normalize_template(project_data.get("project_template", "legacy"))
+            if saved_choice != "legacy":
+                preferred = saved_choice
+                self.settings["last_caption_template"] = preferred
+                self.settings["last_caption_template_is_global"] = True
+                global_choice = True
+        return preferred if global_choice else normalize_template(
+            project_data.get("project_template", preferred))
 
 
     @staticmethod
@@ -735,9 +772,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
             for key in PROJECT_SETTING_KEYS:
                 if key in self._global_settings:
                     self.settings[key] = copy.deepcopy(self._global_settings[key])
+        self._migrate_global_video_position(data.get("project_settings", {}))
         had_project_template = "project_template" in data
-        project_template = data.get("project_template", "legacy")
-        self.project_template = normalize_template(project_template)
+        self.project_template = self._resolve_project_template_default(data)
         self._sync_caption_template_dropdown()
         self.project_settings = self._normalize_project_settings(
             data.get("project_settings", {}))

@@ -55,6 +55,7 @@ class LayoutMixin:
     def _remember_caption_template(self, template):
         template = normalize_template(template)
         self.settings["last_caption_template"] = template
+        self.settings["last_caption_template_is_global"] = True
         self._sync_caption_template_dropdown()
         self.save_settings()
         return template
