@@ -1,5 +1,6 @@
 import json
 import unittest
+from pathlib import Path
 
 from PIL import Image
 
@@ -15,6 +16,7 @@ from slideshow.slide_design import (
     render_design_layers,
 )
 from slideshow.media_edit import MediaEditMixin
+from slideshow.media_recovery import MediaRecoveryMixin
 from slideshow.export import ExportMixin
 from slideshow.render import RenderMixin
 from slideshow.app import SlideshowApp
@@ -239,6 +241,32 @@ class PresentationModelTests(unittest.TestCase):
         self.assertEqual(templates["My Navy"]["text_align"], "right")
         write_design_templates(settings, templates)
         self.assertIn("My Navy", settings["slide_design_templates"])
+
+    def test_relink_replaces_only_path_and_preserves_edit_order(self):
+        first_edit = {"presentation": {"title": "first"}}
+        second_edit = {"presentation": {"title": "second"}}
+        media = [("image", r"C:\old\first.jpg", first_edit),
+                 ("video", r"C:\old\second.mp4", second_edit)]
+        self.assertTrue(MediaRecoveryMixin._replace_media_path(
+            media, 1, r"D:\new\second.mp4"))
+        self.assertEqual(media[0], ("image", r"C:\old\first.jpg", first_edit))
+        self.assertEqual(media[1][0], "video")
+        self.assertIs(media[1][2], second_edit)
+        self.assertEqual(media[1][1].casefold(),
+                         str(Path(r"D:\new\second.mp4").resolve()).casefold())
+
+    def test_duplicate_filename_match_uses_relative_path_or_stays_ambiguous(self):
+        roots = [r"D:\new_media"]
+        candidates = [r"D:\new_media\room_a\photo.jpg",
+                      r"D:\new_media\room_b\photo.jpg"]
+        match, ambiguous = MediaRecoveryMixin._best_media_candidate(
+            r"C:\old_media\room_a\photo.jpg", candidates, roots)
+        self.assertEqual(match, candidates[0])
+        self.assertFalse(ambiguous)
+        match, ambiguous = MediaRecoveryMixin._best_media_candidate(
+            r"C:\old_media\other_room\photo.jpg", candidates, roots)
+        self.assertIsNone(match)
+        self.assertTrue(ambiguous)
 
     def test_custom_design_templates_are_listed_after_builtins(self):
         choices = design_template_choices(

@@ -25,6 +25,7 @@ from .media_edit import MediaEditMixin
 from .render import RenderMixin
 from .export import ExportMixin
 from .ui_library import LibraryMixin
+from .media_recovery import MediaRecoveryMixin
 from .ui_editors import EditorsMixin
 from .ui_photo_editor import PhotoEditorMixin
 from .ui_erase import EraseSettingsMixin
@@ -60,7 +61,7 @@ PROJECT_TRANSITIONS = {"none", "fade", "fadeblack", "fadewhite", "wipeleft", "wi
                        "wipeup", "wipedown", "smoothleft", "smoothright", "random"}
 
 
-class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, WelcomeMixin, ThemeMixin, SettingsMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin):
+class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, MediaRecoveryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, WelcomeMixin, ThemeMixin, SettingsMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin):
     """Composes every mixin above into the one application object."""
 
     def __init__(self, root, show_welcome=True):
@@ -802,6 +803,12 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Edito
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.selected_indices = set()
+        missing_media = self._resolve_existing_project_media(project_path)
+        if missing_media:
+            if on_loaded:
+                on_loaded()
+            self._show_missing_media_recovery(missing_media)
+            return True
         self.update_media_display()
         if on_loaded:
             on_loaded()
