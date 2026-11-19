@@ -1,4 +1,4 @@
-"""Startup welcome screen and a compact three-step new-project wizard."""
+"""Profile-aware welcome screen and the project setup dialogs."""
 
 import json
 import threading
@@ -8,10 +8,16 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 from .deps import Image, ImageTk
+from .profiles import initials
 from .slide_design import TEMPLATES
-
+from .ui_theme import MODERN_PALETTE as P
+from .ui_widgets import (ScrollFrame, avatar_image, fit_cover, flat_button, format_duration,
+                         hero_image, human_date, placeholder_cover, primary_button,
+                         resolution_for_aspect, rounded_image, aspect_label)
 
 RESOLUTIONS = ("1080x1080", "1920x1080", "1080x1920", "1080x1350", "720x1280")
+ASPECT_CHOICES = (("9:16", "Κάθετο", "1080x1920"), ("4:5", "Portrait", "1080x1350"),
+                  ("1:1", "Τετράγωνο", "1080x1080"), ("16:9", "Οριζόντιο", "1920x1080"))
 BACKGROUND_LABELS = {
     "Θολό φόντο": "blur",
     "Λευκό φόντο": "white",
@@ -27,319 +33,796 @@ TRANSITION_LABELS = {
 
 
 class WelcomeMixin:
-    """Show startup choices and guide new projects without replacing the app UI."""
+    """Profile-aware welcome screen and the project setup dialogs."""
 
     def open_recent_projects(self):
-        """Reopen the startup project browser after the user saves the active work."""
-        if self.is_modified:
-            messagebox.showinfo(
-                "Save project first",
-                "Αποθήκευσε πρώτα το τρέχον project (Ctrl+S) και μετά άνοιξε τα πρόσφατα projects.")
-            return
-        return self.show_welcome_screen()
+        return self.return_to_welcome()
 
-    def show_welcome_screen(self):
-        if getattr(self, "_welcome_dialog", None) is not None:
-            try:
-                if self._welcome_dialog.winfo_exists():
-                    self._welcome_dialog.lift()
-                    return self._welcome_dialog
-            except tk.TclError:
-                pass
-
-        dialog = tk.Toplevel(self.root)
-        self._welcome_dialog = dialog
-        dialog.title("Καλώς ήρθες — Slideshow Video Creator Pro")
-        dialog.geometry("1180x800")
-        dialog.minsize(920, 640)
-        dialog.resizable(True, True)
-        if not getattr(self, "_root_hidden_until_welcome", False):
-            dialog.transient(self.root)
-        else:
-            try:
-                dialog.attributes("-topmost", True)
-            except tk.TclError:
-                pass
-        dialog.grab_set()
-
-        modern = self.settings.get("ui_theme", "modern") == "modern"
-        window_bg = "#202127" if modern else "SystemButtonFace"
-        card_bg = "#292b31" if modern else "#f2f2f2"
-        text_fg = "#f2f2f2" if modern else "#202020"
-        muted_fg = "#b8bbc2" if modern else "#555555"
-        accent = "#d6b86a" if modern else "#3b6ea8"
-        body = ttk.Frame(dialog, padding=18)
-        body.pack(fill="both", expand=True)
-        body.rowconfigure(1, weight=1)
-        body.columnconfigure(0, weight=1)
-
-        header = ttk.Frame(body)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        header.columnconfigure(0, weight=1)
-        ttk.Label(header, text="Slideshow Video Creator Pro",
-                  font=("Calibri", 21, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(header, text="Τα 30 πιο πρόσφατα projects",
-                  font=("Calibri", 11), foreground=muted_fg).grid(
-            row=1, column=0, sticky="w", pady=(2, 0))
-        search_var = tk.StringVar()
-        ttk.Label(header, text="Αναζήτηση όλων των projects:", foreground=muted_fg).grid(
-            row=0, column=1, sticky="e", padx=(12, 0))
-        search = ttk.Entry(header, textvariable=search_var, width=32)
-        search.grid(row=1, column=1, sticky="e", padx=(12, 0))
-
+    # ------------------------------------------------------------ helpers
+    def _welcome_project_records(self, limit=30):
         records = []
-        for project_path in sorted(self.projects_dir.glob("*.json"),
-                                   key=lambda path: path.stat().st_mtime, reverse=True):
+        try:
+            files = sorted(self.projects_dir.glob("*.json"),
+                           key=lambda path: path.stat().st_mtime, reverse=True)
+        except OSError:
+            return []
+        for project_path in files[:limit]:
             try:
                 with open(project_path, "r", encoding="utf-8-sig") as stream:
                     data = json.load(stream)
             except Exception:
-                data = {}
-            media = data.get("media_files", data.get("media", [])) if isinstance(data, dict) else []
-            candidates = []
-            for item in media if isinstance(media, list) else []:
-                if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            if not isinstance(data, dict):
+                continue
+            media = data.get("media_files", data.get("media", []))
+            media = media if isinstance(media, list) else []
+            cover_path, cover_kind = "", ""
+            for item in media:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    candidate = str(item[1])
+                    if Path(candidate).is_file():
+                        cover_path, cover_kind = candidate, str(item[0]).lower()
+                        break
+            project_settings = data.get("project_settings")
+            project_settings = project_settings if isinstance(project_settings, dict) else {}
+            resolution = project_settings.get("resolution") or self.settings.get(
+                "resolution", "1080x1080")
+            try:
+                default_slide = max(0.2, float(project_settings.get(
+                    "slide_duration", self.settings.get("slide_duration", 3))))
+            except (TypeError, ValueError):
+                default_slide = 3.0
+            total_seconds = 0.0
+            for item in media:
+                if not isinstance(item, (list, tuple)) or len(item) < 3:
                     continue
-                candidate = str(item[1])
-                if Path(candidate).is_file():
-                    candidates.append((str(item[0]).lower(), candidate))
-            preferred = next((item for item in candidates if item[0] == "video"),
-                             candidates[0] if candidates else ("", ""))
+                try:
+                    edit = item[2] if isinstance(item[2], dict) else {}
+                    presentation = edit.get("presentation", {})
+                    override = (presentation.get("duration")
+                                if isinstance(presentation, dict) else None)
+                    total_seconds += float(override) if override else default_slide
+                except (TypeError, ValueError, IndexError):
+                    total_seconds += default_slide
+            try:
+                modified = project_path.stat().st_mtime
+            except OSError:
+                modified = 0
             records.append({
                 "path": project_path,
-                "name": str(data.get("name") or project_path.stem),
-                "media_path": preferred[1],
-                "media_type": preferred[0],
+                "name": str(data.get("name") or project_path.stem or "Χωρίς όνομα"),
+                "media_path": cover_path,
+                "media_type": cover_kind,
+                "count": len(media),
+                "aspect": aspect_label(resolution),
+                "duration": max(1, total_seconds),
+                "modified": modified,
             })
-        recent_records = records[:30]
+        return records
 
-        content = ttk.Frame(body)
-        content.grid(row=1, column=0, sticky="nsew")
-        content.rowconfigure(0, weight=1)
-        content.columnconfigure(0, weight=1)
-        cards_canvas = tk.Canvas(content, bg=window_bg, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(content, orient="vertical", command=cards_canvas.yview)
-        cards_canvas.configure(yscrollcommand=scrollbar.set)
-        cards_canvas.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        cards_frame = ttk.Frame(cards_canvas)
-        cards_window = cards_canvas.create_window((0, 0), window=cards_frame, anchor="nw")
-        cards_frame.bind("<Configure>", lambda _e: cards_canvas.configure(
-            scrollregion=cards_canvas.bbox("all")))
-        cards_canvas.bind("<Configure>", lambda e: cards_canvas.itemconfigure(
-            cards_window, width=e.width))
-        status = ttk.Label(body, text="", foreground=muted_fg)
-        status.grid(row=2, column=0, sticky="w", pady=(5, 0))
-        ttk.Label(body, text=f"Φάκελος projects: {self.projects_dir}",
-                  foreground=muted_fg, font=("Calibri", 8)).grid(
-            row=3, column=0, sticky="w", pady=(2, 0))
-
-        selected = {"path": recent_records[0]["path"] if recent_records else None}
-        card_widgets = {}
-        thumbnail_cache = {}
-        thumbnail_refs = {}
-        thumbnail_labels = {}
-        thumbnail_pending = set()
-        thumbnail_failed = set()
-        welcome_state = {"closed": False}
-
-        def choose(record):
-            selected["path"] = record["path"]
-            for path, frame in card_widgets.items():
-                frame.configure(highlightbackground=(accent if path == selected["path"]
-                                                     else ("#41434a" if modern else "#b8b8b8")),
-                                highlightthickness=3 if path == selected["path"] else 1)
-            status.config(text=f"Επιλεγμένο: {record['name']}")
-
-        def open_selected(_event=None):
-            project_path = selected.get("path")
-            if project_path is None:
-                open_project_browser()
-                return
-            self.load_project(project_path=project_path, on_loaded=close)
-
-        def load_project_thumbnail(record):
-            if record["media_type"] == "video":
-                image = self._video_first_frame(record["media_path"])
-            else:
-                image = Image.open(record["media_path"])
-                image.load()
-            image = image.convert("RGB")
-            target_w, target_h = 320, 180
-            scale = max(target_w / image.width, target_h / image.height)
-            image = image.resize((round(image.width * scale), round(image.height * scale)),
-                                 Image.Resampling.LANCZOS)
-            left = max(0, (image.width - target_w) // 2)
-            top = max(0, (image.height - target_h) // 2)
-            return image.crop((left, top, left + target_w, top + target_h))
-
-        def set_thumbnail(project_path, image):
-            thumbnail_pending.discard(project_path)
-            if welcome_state["closed"]:
-                return
-            if image is None:
-                thumbnail_failed.add(project_path)
-                return
-            photo = ImageTk.PhotoImage(image)
-            thumbnail_cache[project_path] = photo
-            thumbnail_refs[project_path] = photo
-            label = thumbnail_labels.get(project_path)
-            if label is not None:
-                try:
-                    if label.winfo_exists():
-                        label.configure(image=photo, text="", width=0, height=0)
-                        label.image_ref = photo
-                except tk.TclError:
-                    pass
-
-        def request_thumbnails(project_list):
-            todo = []
-            for record in project_list:
-                project_path = record["path"]
-                if (record["media_path"] and project_path not in thumbnail_cache and
-                        project_path not in thumbnail_pending and
-                        project_path not in thumbnail_failed):
-                    thumbnail_pending.add(project_path)
-                    todo.append(record)
-            if not todo:
-                return
-
-            def worker():
-                for record in todo:
-                    if welcome_state["closed"]:
-                        return
-                    try:
-                        image = load_project_thumbnail(record)
-                    except Exception:
-                        image = None
-                    self._post_ui(set_thumbnail, record["path"], image)
-
-            threading.Thread(target=worker, daemon=True).start()
-
-        def make_card(record, index, columns):
-            row, column = divmod(index, columns)
-            frame = tk.Frame(cards_frame, bg=card_bg, highlightthickness=1,
-                             highlightbackground=(accent if record["path"] == selected["path"]
-                                                  else ("#41434a" if modern else "#b8b8b8")))
-            frame.grid(row=row, column=column, sticky="nsew", padx=8, pady=8)
-            cards_frame.columnconfigure(column, weight=1, uniform="recent-projects")
-            image = thumbnail_cache.get(record["path"])
-            if image is not None:
-                thumb = tk.Label(frame, image=image, bg=card_bg)
-                thumb.image_ref = image
-            else:
-                thumb = tk.Label(frame, text="▣", bg=card_bg, fg=muted_fg,
-                                 width=40, height=9, font=("Segoe UI", 25))
-            thumb.pack(fill="both", padx=6, pady=(6, 2))
-            title = tk.Label(frame, text=record["name"], bg=card_bg, fg=text_fg,
-                             anchor="w", justify="left", wraplength=310,
-                             font=("Segoe UI", 10, "bold"))
-            title.pack(fill="x", padx=8, pady=(3, 8))
-            card_widgets[record["path"]] = frame
-            thumbnail_labels[record["path"]] = thumb
-            for widget in (frame, thumb, title):
-                widget.bind("<Button-1>", lambda _e, item=record: choose(item))
-                widget.bind("<Double-Button-1>", open_selected)
-            if image:
-                thumbnail_refs[record["path"]] = image
-
-        def refresh_cards(*_):
-            for widget in cards_frame.winfo_children():
-                widget.destroy()
-            card_widgets.clear()
-            thumbnail_labels.clear()
-            query = search_var.get().strip().casefold()
-            visible = ([record for record in records
-                        if query in record["name"].casefold() or
-                        query in record["path"].stem.casefold()]
-                       if query else recent_records)
-            width = max(1, cards_canvas.winfo_width())
-            columns = max(1, min(4, width // 340))
-            for index, record in enumerate(visible):
-                make_card(record, index, columns)
-            if selected.get("path") not in {record["path"] for record in visible}:
-                selected["path"] = visible[0]["path"] if visible else None
-            request_thumbnails(visible[:30])
-            if not records:
-                status.config(text="Δεν υπάρχουν αποθηκευμένα projects ακόμη.")
-            elif not visible:
-                status.config(text="Δεν βρέθηκαν projects με αυτό το όνομα.")
-            else:
-                selected_record = next((record for record in visible
-                                        if record["path"] == selected.get("path")), None)
-                status.config(text=(f"Επιλεγμένο: {selected_record['name']}" if selected_record
-                                   else f"Βρέθηκαν {len(visible)} project(s). Διάλεξε ένα για άνοιγμα."))
-
-        search_state = {"job": None}
-
-        def schedule_search(*_):
-            if search_state["job"]:
-                try:
-                    dialog.after_cancel(search_state["job"])
-                except tk.TclError:
-                    pass
-            search_state["job"] = dialog.after(180, refresh_cards)
-
-        search_var.trace_add("write", schedule_search)
-        cards_canvas.bind("<Configure>", refresh_cards, add="+")
-        refresh_cards()
-
-        def close():
-            welcome_state["closed"] = True
+    def _finish_welcome(self):
+        state = getattr(self, "_welcome_state", None)
+        if state:
+            state["closed"] = True
+        dialog = getattr(self, "_welcome_dialog", None)
+        self._welcome_dialog = None
+        self._welcome_state = None
+        if dialog is not None:
             try:
                 if dialog.grab_current() == dialog:
                     dialog.grab_release()
             except tk.TclError:
                 pass
-            if getattr(self, "_welcome_dialog", None) is dialog:
-                self._welcome_dialog = None
             try:
                 dialog.destroy()
             except tk.TclError:
                 pass
-            if getattr(self, "_root_hidden_until_welcome", False):
-                self._root_hidden_until_welcome = False
-                try:
-                    self.root.deiconify()
-                    self.root.lift()
-                except tk.TclError:
-                    pass
 
-        def restore_welcome_grab(_event=None):
+    def _enter_editor(self):
+        self._root_hidden_until_welcome = False
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+        except tk.TclError:
+            pass
+        self._refresh_header()
+        self._refresh_stage()
+        self._update_saved_status()
+        if hasattr(self, "inspector_content"):
+            self._render_inspector()
+
+    def _open_project_from_welcome(self, path):
+        path = Path(path)
+        if not path.is_file():
+            messagebox.showerror("Άνοιγμα project",
+                                 "Το project δεν βρίσκεται πια στον φάκελο του προφίλ.")
+            return False
+        self._finish_welcome()
+        self._root_hidden_until_welcome = False
+        try:
+            self.root.deiconify()
+            self.root.lift()
+        except tk.TclError:
+            pass
+        if not self.load_project_file(path):
             try:
-                if dialog.winfo_exists():
-                    dialog.grab_set()
+                self.root.withdraw()
+            except tk.TclError:
+                pass
+            self.show_welcome_screen()
+            return False
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            pass
+        self._enter_editor()
+        return True
+
+    def _new_project_ready(self):
+        self._finish_welcome()
+        self._enter_editor()
+        self.update_media_display()
+        self._schedule_preview(150)
+        self.render_storyboard()
+        self._refresh_inspector_after_media()
+        self._refresh_export_estimate()
+
+    def _reopen_welcome(self):
+        self._finish_welcome()
+        try:
+            self.root.withdraw()
+        except tk.TclError:
+            pass
+        self.root.after(25, self.show_welcome_screen)
+
+    # ---------------------------------------------------------- main screen
+    def show_welcome_screen(self):
+        existing = getattr(self, "_welcome_dialog", None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.deiconify()
+                    existing.lift()
+                    return existing
+            except tk.TclError:
+                pass
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Καλώς ήρθες — Slideshow Video Creator Pro")
+        screen_w = dialog.winfo_screenwidth()
+        screen_h = dialog.winfo_screenheight()
+        width = min(1280, max(980, screen_w - 80))
+        height = min(840, max(650, screen_h - 100))
+        x = max(0, (screen_w - width) // 2)
+        y = max(0, (screen_h - height) // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.minsize(min(980, width), min(640, height))
+        dialog.configure(bg=P["background"])
+        self._welcome_dialog = dialog
+        state = {
+            "closed": False,
+            "thumb_token": 0,
+            "pil_cache": {},
+            "photo_refs": {},
+        }
+        self._welcome_state = state
+        try:
+            dialog.attributes("-topmost", True)
+            dialog.after(900, lambda: self._drop_topmost(dialog))
+        except tk.TclError:
+            pass
+
+        body = tk.Frame(dialog, bg=P["background"], padx=26, pady=16)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(1, weight=1)
+
+        self._build_welcome_header(body)
+        content = tk.Frame(body, bg=P["background"])
+        content.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(14, 0))
+        content.columnconfigure(0, minsize=252)
+        content.columnconfigure(1, weight=1)
+        content.rowconfigure(0, weight=1)
+
+        profiles_panel = tk.Frame(content, bg=P["panel"], highlightthickness=1,
+                                  highlightbackground=P["border"])
+        profiles_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+        right = tk.Frame(content, bg=P["background"])
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(2, weight=1)
+
+        records = self._welcome_project_records()
+        last_path = self.get_last_project()
+        if last_path is None and records:
+            last_path = records[0]["path"]
+        last_record = next((record for record in records
+                            if record["path"] == Path(last_path)), None) if last_path else None
+        if last_record is None and records:
+            last_record = records[0]
+
+        self._build_profile_panel(profiles_panel)
+        self._build_hero(right, records, last_record)
+        self._build_recent_projects(right, records)
+
+        footer = tk.Frame(body, bg=P["background"])
+        footer.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        tk.Label(footer, text=f"Χώρος εργασίας: {self.projects_dir}", bg=P["background"],
+                 fg=P["border"], font=("Segoe UI", 8)).pack(side="left")
+        tk.Label(footer, text="Τα δεδομένα μένουν στον υπολογιστή σου.",
+                 bg=P["background"], fg=P["border"], font=("Segoe UI", 8)).pack(
+            side="right")
+
+        def close_app():
+            self.on_closing()
+            try:
+                if dialog.winfo_exists() and self.root.winfo_exists():
                     dialog.lift()
             except tk.TclError:
                 pass
 
-        def open_project_browser():
-            load_dialog = self.load_project(on_loaded=close)
-            if load_dialog is not None:
-                load_dialog.bind("<Destroy>", restore_welcome_grab, add="+")
+        dialog.protocol("WM_DELETE_WINDOW", close_app)
+        dialog.bind("<Escape>", lambda _e: (close_app(), "break")[1])
+        dialog.update_idletasks()
+        dialog.lift()
+        dialog.focus_force()
+        return dialog
 
-        def open_wizard():
-            wizard = self.open_new_project_wizard(on_created=close)
-            if wizard is not None:
-                wizard.bind("<Destroy>", restore_welcome_grab, add="+")
+    def _drop_topmost(self, dialog):
+        try:
+            if dialog.winfo_exists():
+                dialog.attributes("-topmost", False)
+        except tk.TclError:
+            pass
 
-        footer = ttk.Frame(body)
-        footer.grid(row=4, column=0, sticky="ew", pady=(12, 0))
-        ttk.Button(footer, text="Open Project", command=open_selected).pack(side="right", padx=4)
-        ttk.Button(footer, text="New Project Wizard",
-                   command=open_wizard).pack(side="right", padx=4)
-        ttk.Button(footer, text="New Project",
-                   command=lambda: (self.new_project(), close())).pack(side="right", padx=4)
+    def _build_welcome_header(self, parent):
+        header = tk.Frame(parent, bg=P["background"])
+        header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        mark = avatar_image("SV", P["accent"], 36, P["background"])
+        photo = ImageTk.PhotoImage(mark)
+        logo = tk.Label(header, image=photo, bg=P["background"])
+        logo.image = photo
+        logo.pack(side="left")
+        brand = tk.Frame(header, bg=P["background"])
+        brand.pack(side="left", padx=(10, 0))
+        tk.Label(brand, text="SLIDESHOW", bg=P["background"], fg=P["accent"],
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        tk.Label(brand, text="Video Creator Pro", bg=P["background"], fg=P["text"],
+                 font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        tk.Label(header, text="Τοπικά projects · Ένα περιβάλλον για κάθε προφίλ",
+                 bg=P["background"], fg=P["muted"], font=("Segoe UI", 9)).pack(
+            side="right", pady=(8, 0))
+
+    def _build_profile_panel(self, parent):
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+        header = tk.Frame(parent, bg=P["panel"])
+        header.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 6))
+        tk.Label(header, text="ΠΡΟΦΙΛ", bg=P["panel"], fg=P["muted"],
+                 font=("Segoe UI", 8, "bold")).pack(side="left")
+        count = len(self.profiles_data.get("profiles", []))
+        tk.Label(header, text=str(count), bg=P["panel"], fg=P["muted"],
+                 font=("Segoe UI", 8)).pack(side="right")
+
+        scroller = ScrollFrame(parent, background=P["panel"])
+        scroller.grid(row=1, column=0, sticky="nsew", padx=(8, 4))
+        body = scroller.body
+        for profile in self.profiles_data.get("profiles", []):
+            self._make_profile_row(body, profile)
+
+        footer = tk.Frame(parent, bg=P["panel"])
+        footer.grid(row=2, column=0, sticky="ew", padx=12, pady=(8, 12))
+        primary_button(footer, "+  Νέο προφίλ", self._new_profile_from_welcome,
+                       font=("Segoe UI", 9, "bold")).pack(fill="x", pady=(0, 4))
+        flat_button(footer, "Επεξεργασία ενεργού προφίλ",
+                    lambda: self.open_edit_profile_dialog(
+                        self.active_profile_data, on_saved=lambda _p: self._reopen_welcome()),
+                    background=P["panel"], foreground=P["muted"],
+                    active_background=P["selected"], font=("Segoe UI", 8)).pack(fill="x")
+        tk.Label(parent, text="Κάθε προφίλ έχει δικά του projects,\nρυθμίσεις και μουσική.",
+                 bg=P["panel"], fg=P["muted"], font=("Segoe UI", 7),
+                 justify="left").grid(row=3, column=0, sticky="w", padx=14, pady=(0, 12))
+
+    def _make_profile_row(self, parent, profile):
+        active = profile.get("id") == self.active_profile_id
+        row_bg = P["accent_faint"] if active else P["panel"]
+        row = tk.Frame(parent, bg=row_bg, cursor="hand2", padx=7, pady=6,
+                       highlightthickness=1,
+                       highlightbackground=(P["accent"] if active else row_bg))
+        row.pack(fill="x", padx=2, pady=2)
+        image = avatar_image(initials(profile.get("name")), profile.get("color", P["accent"]),
+                             38, row_bg)
+        photo = ImageTk.PhotoImage(image)
+        avatar = tk.Label(row, image=photo, bg=row_bg, bd=0)
+        avatar.image = photo
+        avatar.pack(side="left")
+        text = tk.Frame(row, bg=row_bg)
+        text.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        tk.Label(text, text=profile.get("name", "Προφίλ"), bg=row_bg, fg=P["text"],
+                 font=("Segoe UI", 9, "bold"), anchor="w").pack(fill="x")
+        tk.Label(text, text=profile.get("role", "") or "Προφίλ", bg=row_bg,
+                 fg=P["muted"], font=("Segoe UI", 7), anchor="w").pack(fill="x")
+        if active:
+            tk.Label(row, text="✓", bg=row_bg, fg=P["accent"],
+                     font=("Segoe UI", 11, "bold")).pack(side="right")
+
+        def choose(_event=None):
+            if active:
+                return
+            self._finish_welcome()
+            self.switch_profile(profile["id"])
+            try:
+                self.root.withdraw()
+            except tk.TclError:
+                pass
+            self.root.after(20, self.show_welcome_screen)
+
+        for widget in [row, avatar, text, *text.winfo_children()]:
+            widget.bind("<Button-1>", choose)
+            widget.bind("<Double-Button-1>", lambda _e, p=profile:
+                        self.open_edit_profile_dialog(p, on_saved=lambda _p: self._reopen_welcome()))
+
+    def _new_profile_from_welcome(self):
+        return self.open_new_profile_dialog(
+            on_created=lambda _profile: self._reopen_welcome())
+
+    def _build_hero(self, parent, records, last_record):
+        hero = tk.Frame(parent, bg=P["panel"], height=232, highlightthickness=1,
+                        highlightbackground=P["border"])
+        hero.grid(row=0, column=0, sticky="ew")
+        hero.grid_propagate(False)
+        hero.columnconfigure(0, weight=1)
+        hero.columnconfigure(1, weight=0)
+
+        content = tk.Frame(hero, bg=P["panel"], padx=24, pady=18)
+        content.grid(row=0, column=0, sticky="nsew")
+        tk.Label(content, text="SLIDESHOW · VIDEO CREATOR PRO", bg=P["panel"],
+                 fg=P["accent"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        name = self.active_profile_data.get("name", "").split()
+        greeting = name[0] if name else "καλώς ήρθες"
+        tk.Label(content, text=f"Καλώς ήρθες, {greeting}", bg=P["panel"], fg=P["text"],
+                 font=("Segoe UI", 24, "bold")).pack(anchor="w", pady=(4, 2))
+        role = self.active_profile_data.get("role", "")
+        description = (f"{role} · " if role else "") + \
+                      "Φτιάξε εντυπωσιακά βίντεο από τις φωτογραφίες σου."
+        tk.Label(content, text=description, bg=P["panel"], fg=P["muted"],
+                 font=("Segoe UI", 9), wraplength=330, justify="left").pack(anchor="w")
+        last_text = (f"Τελευταίο project: {last_record['name']}" if last_record else
+                     "Ξεκίνα το πρώτο σου project σε αυτό το προφίλ.")
+        tk.Label(content, text=last_text, bg=P["panel"], fg=P["muted"],
+                 font=("Segoe UI", 8), wraplength=330, justify="left").pack(
+            anchor="w", pady=(10, 0))
+
+        buttons = tk.Frame(content, bg=P["panel"])
+        buttons.pack(anchor="w", pady=(14, 0))
+        if last_record:
+            continue_text = "Συνέχεια στο project"
+            continue_command = lambda: self._open_project_from_welcome(last_record["path"])
+        else:
+            continue_text = "Δημιουργία πρώτου project"
+            continue_command = self._quick_new_project_from_welcome
+        primary_button(buttons, continue_text, continue_command,
+                       font=("Segoe UI", 9, "bold"), padx=16, pady=8).pack(side="left")
+        flat_button(buttons, "Νέο project", self._quick_new_project_from_welcome,
+                    background=P["raised"], foreground=P["text"],
+                    active_background=P["selected"], font=("Segoe UI", 9),
+                    padx=16, pady=8).pack(side="left", padx=(8, 0))
+        if records:
+            flat_button(buttons, "Όλα τα projects", self._open_project_browser,
+                        background=P["panel"], foreground=P["muted"],
+                        active_background=P["selected"], font=("Segoe UI", 8),
+                        padx=6, pady=8).pack(side="left", padx=(8, 0))
+
+        photo_holder = tk.Frame(hero, bg=P["panel"], width=380, height=232)
+        photo_holder.grid(row=0, column=1, sticky="nsew")
+        photo_holder.pack_propagate(False)
+        photo_label = tk.Label(photo_holder, bg=P["panel"])
+        photo_label.pack(fill="both", expand=True)
+        self._welcome_hero_label = photo_label
+        self._queue_hero_image(photo_label, last_record)
+
+    def _queue_hero_image(self, label, record):
+        state = getattr(self, "_welcome_state", None)
+        if state is None:
+            return
+        path = record["media_path"] if record else ""
+
+        def apply(image):
+            if state.get("closed"):
+                return
+            try:
+                if not label.winfo_exists():
+                    return
+                photo = ImageTk.PhotoImage(image)
+                state["photo_refs"]["hero"] = photo
+                label.configure(image=photo, width=0, height=0)
+                label.image = photo
+            except tk.TclError:
+                pass
+
+        def worker():
+            image = None
+            if path and Path(path).is_file():
+                try:
+                    if record["media_type"] == "video":
+                        image = self._video_first_frame(path)
+                    else:
+                        image = Image.open(path)
+                        image.load()
+                except Exception:
+                    image = None
+            try:
+                composed = hero_image(image, 380, 232, P["panel"], fade=0.6)
+            except Exception:
+                composed = placeholder_cover(380, 232, initials(
+                    self.active_profile_data.get("name")), P["accent"])
+            self._post_ui(apply, composed)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _build_recent_projects(self, parent, records):
+        header = tk.Frame(parent, bg=P["background"])
+        header.grid(row=1, column=0, sticky="ew", pady=(18, 6))
+        tk.Label(header, text="Πρόσφατα project", bg=P["background"], fg=P["text"],
+                 font=("Segoe UI", 13, "bold")).pack(side="left")
+        self._welcome_recent_count = tk.StringVar(value=f"{len(records)}")
+        tk.Label(header, textvariable=self._welcome_recent_count, bg=P["background"],
+                 fg=P["muted"], font=("Segoe UI", 9)).pack(side="left", padx=(7, 0))
+
+        search_var = tk.StringVar()
+        search = ttk.Entry(header, textvariable=search_var, width=28,
+                           style="Field.TEntry")
+        search.pack(side="right")
+        tk.Label(header, text="Αναζήτηση", bg=P["background"], fg=P["muted"],
+                 font=("Segoe UI", 8)).pack(side="right", padx=(0, 6))
+        search.focus_set()
+
+        scroller = ScrollFrame(parent, background=P["background"])
+        scroller.grid(row=2, column=0, sticky="nsew")
+        grid = scroller.body
+        state = self._welcome_state
+        state["grid"] = grid
+        state["records"] = records
+        state["search_var"] = search_var
+        state["layout_job"] = None
+        state["reflow_job"] = None
+        state["card_widgets"] = {}
+
+        def schedule_reflow(*_args):
+            job = state.get("layout_job")
+            if job is not None:
+                try:
+                    self.root.after_cancel(job)
+                except tk.TclError:
+                    pass
+            state["layout_job"] = self.root.after(160, reflow)
+
+        def reflow():
+            state["layout_job"] = None
+            if state.get("closed"):
+                return
+            query = search_var.get().strip().casefold()
+            visible = [record for record in records
+                       if not query or query in record["name"].casefold() or
+                       query in record["path"].stem.casefold()]
+            self._welcome_recent_count.set(str(len(visible)))
+            for child in grid.winfo_children():
+                child.destroy()
+            state["card_widgets"] = {}
+            state["thumb_token"] = state.get("thumb_token", 0) + 1
+            width = scroller.canvas.winfo_width()
+            columns = 3 if width >= 980 else 2 if width >= 620 else 1
+            for column in range(3):
+                grid.columnconfigure(column, weight=1 if column < columns else 0,
+                                     uniform="recent" if column < columns else "")
+            if not records:
+                self._welcome_empty_state(
+                    grid, "Δεν υπάρχει ακόμη project σε αυτό το προφίλ.",
+                    "Δημιούργησε το πρώτο σου project", self._quick_new_project_from_welcome)
+                return
+            if not visible:
+                self._welcome_empty_state(
+                    grid, "Δεν βρέθηκαν projects με αυτό το όνομα.",
+                    "Καθάρισε την αναζήτηση", lambda: search_var.set(""))
+                return
+            card_width = max(210, (max(width, 600) - 12 * (columns + 1)) // columns)
+            cover_height = 148
+            todo = []
+            for position, record in enumerate(visible):
+                row, column = divmod(position, columns)
+                card = self._make_recent_card(
+                    grid, record, row, column, card_width, cover_height)
+                state["card_widgets"][record["path"]] = card
+                todo.append((record, card))
+            self._queue_card_thumbs(todo[:15], max(120, card_width - 12), cover_height)
+
+        def queue_resize(_event=None):
+            job = state.get("reflow_job")
+            if job is not None:
+                try:
+                    self.root.after_cancel(job)
+                except tk.TclError:
+                    pass
+            state["reflow_job"] = self.root.after(180, reflow)
+
+        search_var.trace_add("write", schedule_reflow)
+        scroller.canvas.bind("<Configure>", queue_resize, add="+")
+        reflow()
+
+    def _welcome_empty_state(self, parent, text, action_label, command):
+        box = tk.Frame(parent, bg=P["raised"], highlightthickness=1,
+                       highlightbackground=P["border"], padx=24, pady=28)
+        box.grid(row=0, column=0, columnspan=3, sticky="nsew", padx=6, pady=6)
+        tk.Label(box, text="▣", bg=P["raised"], fg=P["accent"],
+                 font=("Segoe UI", 26)).pack()
+        tk.Label(box, text=text, bg=P["raised"], fg=P["text"],
+                 font=("Segoe UI", 11, "bold"), wraplength=420).pack(pady=(6, 2))
+        tk.Label(box, text="Μπορείς να αλλάξεις προφίλ ή να ξεκινήσεις νέο project.",
+                 bg=P["raised"], fg=P["muted"], font=("Segoe UI", 8)).pack()
+        primary_button(box, action_label, command).pack(pady=(14, 0))
+
+    def _make_recent_card(self, parent, record, row, column, width, cover_height):
+        card = tk.Frame(parent, bg=P["raised"], highlightthickness=1,
+                        highlightbackground=P["border"], cursor="hand2")
+        card.grid(row=row, column=column, sticky="nsew", padx=6, pady=6)
+        holder = tk.Frame(card, bg=P["stage"], height=cover_height)
+        holder.pack(fill="x", padx=6, pady=(6, 4))
+        holder.pack_propagate(False)
+        cover = tk.Label(holder, bg=P["stage"], text="▣", fg=P["muted"],
+                         font=("Segoe UI", 22))
+        cover.pack(fill="both", expand=True)
+        card._cover_label = cover
+        card._cover_holder = holder
+        name = tk.Label(card, text=record["name"], bg=P["raised"], fg=P["text"],
+                        font=("Segoe UI", 10, "bold"), anchor="w",
+                        wraplength=max(160, width - 24), justify="left")
+        name.pack(fill="x", padx=9)
+        meta = tk.Frame(card, bg=P["raised"])
+        meta.pack(fill="x", padx=9, pady=(2, 5))
+        tk.Label(meta, text=f"{record['aspect']} · {record['count']} σκηνές",
+                 bg=P["raised"], fg=P["muted"], font=("Segoe UI", 8)).pack(side="left")
+        tk.Label(meta, text=f"≈ {format_duration(record['duration'])}",
+                 bg=P["raised"], fg=P["muted"], font=("Segoe UI", 8)).pack(
+            side="right")
+        date_label = tk.Label(card, text=human_date(record["modified"]), bg=P["raised"],
+                              fg=P["muted"], font=("Segoe UI", 7))
+        date_label.pack(anchor="w", padx=9, pady=(0, 8))
+        for widget in (card, holder, cover, name, date_label, meta, *meta.winfo_children()):
+            widget.bind("<Button-1>", lambda _e, path=record["path"]:
+                        self._open_project_from_welcome(path))
+            widget.bind("<Enter>", lambda _e, c=card: c.configure(
+                highlightbackground=P["accent_faint"]))
+            widget.bind("<Leave>", lambda _e, c=card: c.configure(
+                highlightbackground=P["border"]))
+        menu = tk.Menu(card, tearoff=0)
+        menu.add_command(label="Άνοιγμα",
+                         command=lambda path=record["path"]:
+                         self._open_project_from_welcome(path))
+        menu.add_command(label="Άνοιγμα φακέλου",
+                         command=lambda path=record["path"]:
+                         self._open_project_folder(path))
+        for widget in (card, cover, name):
+            widget.bind("<Button-3>", lambda e, m=menu: m.tk_popup(e.x_root, e.y_root))
+        return card
+
+    def _open_project_folder(self, path):
+        import os
+        try:
+            os.startfile(str(Path(path).parent))
+        except OSError:
+            pass
+
+    def _queue_card_thumbs(self, todo, width, height):
+        state = getattr(self, "_welcome_state", None)
+        if state is None or state.get("closed"):
+            return
+        token = state["thumb_token"]
+
+        def apply(card, image, path):
+            if state.get("closed") or token != state.get("thumb_token", 0):
+                return
+            try:
+                if not card.winfo_exists():
+                    return
+                cover = getattr(card, "_cover_label", None)
+                if cover is None:
+                    return
+                photo = ImageTk.PhotoImage(image)
+                cover.configure(image=photo, text="", width=0, height=0)
+                cover.image = photo
+                state["photo_refs"][str(path)] = photo
+            except tk.TclError:
+                pass
+
+        pending = []
+        for record, card in todo:
+            key = (str(record["path"]), width, height)
+            cached = state["pil_cache"].get(key)
+            if cached is not None:
+                apply(card, cached, record["path"])
+            else:
+                pending.append((record, card, key))
+
+        if not pending:
+            return
+
+        def worker():
+            for record, card, key in pending:
+                if state.get("closed") or token != state.get("thumb_token", 0):
+                    break
+                image = None
+                if record["media_path"] and Path(record["media_path"]).is_file():
+                    try:
+                        if record["media_type"] == "video":
+                            image = self._video_first_frame(record["media_path"])
+                        else:
+                            image = Image.open(record["media_path"])
+                            image.load()
+                    except Exception:
+                        image = None
+                try:
+                    if image is not None:
+                        composed = rounded_image(image, (width, height), 9, P["raised"])
+                    else:
+                        composed = placeholder_cover(
+                            width, height, record["name"][:2].upper(), P["accent"])
+                except Exception:
+                    composed = placeholder_cover(width, height, "SV", P["accent"])
+                state["pil_cache"][key] = composed
+                self._post_ui(apply, card, composed, record["path"])
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _open_project_browser(self):
+        def loaded():
+            self._finish_welcome()
+            self._enter_editor()
+
+        return self.load_project(on_loaded=loaded)
+
+    # ----------------------------------------------------- quick new project
+    def _quick_new_project_from_welcome(self):
+        return self.open_quick_new_project_dialog(on_created=self._new_project_ready)
+
+    def open_quick_new_project_dialog(self, on_created=None):
+        owner = getattr(self, "_welcome_dialog", None) or self.root
+        dialog = tk.Toplevel(owner)
+        dialog.title("Νέο project")
+        dialog.configure(bg=P["background"])
+        dialog.geometry("600x560")
+        dialog.resizable(False, False)
+        dialog.transient(owner)
+        dialog.grab_set()
+
+        body = tk.Frame(dialog, bg=P["background"], padx=24, pady=20)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text="ΝΕΟ PROJECT", bg=P["background"], fg=P["muted"],
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        tk.Label(body, text="Ξεκίνα από μια ιδέα", bg=P["background"], fg=P["text"],
+                 font=("Segoe UI", 19, "bold")).pack(anchor="w", pady=(2, 2))
+        tk.Label(body, text=f"Προφίλ: {self.active_profile_data.get('name', '')}",
+                 bg=P["background"], fg=P["muted"], font=("Segoe UI", 9)).pack(anchor="w")
+
+        name_var = tk.StringVar()
+        folder_var = tk.StringVar(value=(self.settings.get("output_folder") or
+                                         str(self._default_output_folder())))
+        aspect_var = tk.StringVar(value=aspect_label(self.settings.get("resolution")))
+
+        tk.Label(body, text="Όνομα project", bg=P["background"], fg=P["muted"],
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(16, 4))
+        name_entry = ttk.Entry(body, textvariable=name_var, style="Field.TEntry",
+                               font=("Segoe UI", 11))
+        name_entry.pack(fill="x")
+
+        tk.Label(body, text="Κάδρο", bg=P["background"], fg=P["muted"],
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(14, 4))
+        aspects = tk.Frame(body, bg=P["background"])
+        aspects.pack(fill="x")
+        aspect_buttons = {}
+
+        def choose_aspect(value):
+            aspect_var.set(value)
+            for key, button in aspect_buttons.items():
+                button.configure(highlightbackground=(P["accent"] if key == value
+                                                       else P["border"]),
+                                 highlightthickness=2 if key == value else 1)
+
+        for index, (value, label, _resolution) in enumerate(ASPECT_CHOICES):
+            card = tk.Frame(aspects, bg=P["raised"], padx=12, pady=8,
+                            highlightthickness=1, highlightbackground=P["border"],
+                            cursor="hand2")
+            card.grid(row=index // 2, column=index % 2, sticky="nsew", padx=3, pady=3)
+            aspects.columnconfigure(index % 2, weight=1)
+            tk.Label(card, text=value, bg=P["raised"], fg=P["text"],
+                     font=("Segoe UI", 12, "bold")).pack(anchor="w")
+            tk.Label(card, text=label, bg=P["raised"], fg=P["muted"],
+                     font=("Segoe UI", 8)).pack(anchor="w")
+            for widget in (card, *card.winfo_children()):
+                widget.bind("<Button-1>", lambda _e, v=value: choose_aspect(v))
+            aspect_buttons[value] = card
+        choose_aspect(aspect_var.get())
+
+        tk.Label(body, text="Φάκελος εξόδου", bg=P["background"], fg=P["muted"],
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(14, 4))
+        folder_row = tk.Frame(body, bg=P["background"])
+        folder_row.pack(fill="x")
+        ttk.Entry(folder_row, textvariable=folder_var, style="Field.TEntry").pack(
+            side="left", fill="x", expand=True)
+
+        def browse():
+            folder = filedialog.askdirectory(parent=dialog,
+                                             initialdir=folder_var.get() or None)
+            if folder:
+                folder_var.set(folder)
+
+        flat_button(folder_row, "Αλλαγή", browse, background=P["raised"],
+                    foreground=P["text"], active_background=P["selected"],
+                    font=("Segoe UI", 8)).pack(side="left", padx=(6, 0))
+
+        warning = tk.Label(body, text="", bg=P["background"], fg=P["danger"],
+                           font=("Segoe UI", 9))
+        warning.pack(anchor="w", pady=(8, 0))
+
+        footer = tk.Frame(body, bg=P["background"])
+        footer.pack(side="bottom", fill="x", pady=(10, 0))
+
+        def close():
+            try:
+                if dialog.grab_current() == dialog:
+                    dialog.grab_release()
+            except tk.TclError:
+                pass
+            dialog.destroy()
+
+        def advanced():
+            close()
+            self.open_new_project_wizard(on_created=on_created)
+
+        def create():
+            name = name_var.get().strip()
+            folder = folder_var.get().strip()
+            if not name:
+                warning.config(text="Γράψε ένα όνομα για το project.")
+                name_entry.focus_set()
+                return
+            if not folder or not Path(folder).is_dir():
+                warning.config(text="Διάλεξε έναν υπαρκτό φάκελο εξόδου.")
+                return
+            self.new_project()
+            self.name_var.set(name)
+            self.out_var.set(folder)
+            self.settings["output_folder"] = folder
+            self.settings["resolution"] = resolution_for_aspect(aspect_var.get())
+            self.save_settings()
+            self.is_modified = True
+            close()
+            if on_created:
+                on_created()
+
+        flat_button(footer, "Περισσότερες ρυθμίσεις…", advanced,
+                    background=P["background"], foreground=P["muted"],
+                    active_background=P["selected"], font=("Segoe UI", 8)).pack(
+            side="left")
+        primary_button(footer, "Δημιουργία project", create,
+                       font=("Segoe UI", 9, "bold")).pack(side="right")
+        flat_button(footer, "Ακύρωση", close, background=P["raised"],
+                    foreground=P["muted"], active_background=P["selected"],
+                    font=("Segoe UI", 9)).pack(side="right", padx=(6, 0))
 
         dialog.protocol("WM_DELETE_WINDOW", close)
         dialog.bind("<Escape>", lambda _e: (close(), "break")[1])
-        self.apply_ui_theme()
+        name_entry.focus_set()
         dialog.update_idletasks()
-        x = max(0, (dialog.winfo_screenwidth() - dialog.winfo_width()) // 2)
-        y = max(0, (dialog.winfo_screenheight() - dialog.winfo_height()) // 3)
-        dialog.geometry(f"+{x}+{y}")
+        try:
+            x = owner.winfo_rootx() + max(0, (owner.winfo_width() - dialog.winfo_width()) // 2)
+            y = owner.winfo_rooty() + max(0, (owner.winfo_height() - dialog.winfo_height()) // 3)
+            dialog.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            pass
         return dialog
 
+    # ------------------------------------------------------- advanced wizard
     def open_new_project_wizard(self, on_created=None):
         dialog = tk.Toplevel(self.root)
         dialog.title("Οδηγός νέου project")
@@ -379,7 +862,6 @@ class WelcomeMixin:
 
         pages = [ttk.Frame(outer), ttk.Frame(outer), ttk.Frame(outer)]
 
-        # --------------------------- step 1: project details
         p1 = pages[0]
         ttk.Label(p1, text="Όνομα project").pack(anchor="w", pady=(12, 3))
         name_entry = ttk.Entry(p1, textvariable=name_var, font=("Calibri", 12))
@@ -398,7 +880,6 @@ class WelcomeMixin:
         ttk.Label(p1, text="Το project παραμένει επεξεργάσιμο· το export γίνεται από το κύριο παράθυρο.",
                   foreground="#666", wraplength=610).pack(anchor="w", pady=(12, 0))
 
-        # --------------------------- step 2: format and design
         p2 = pages[1]
         ttk.Label(p2, text="Μορφή / ανάλυση βίντεο").pack(anchor="w", pady=(12, 3))
         ttk.Combobox(p2, textvariable=resolution_var, values=RESOLUTIONS,
@@ -407,7 +888,7 @@ class WelcomeMixin:
         ttk.Combobox(p2, textvariable=template_var, values=list(TEMPLATES.values()),
                      state="readonly").pack(fill="x")
         ttk.Label(p2, text="Τα slides με «Use Project Default» κληρονομούν αυτό το template· "
-                         "κάθε slide μπορεί να έχει δικό του override.",
+                          "κάθε slide μπορεί να έχει δικό του override.",
                   foreground="#666", wraplength=610).pack(anchor="w", pady=(4, 8))
         ttk.Label(p2, text="Λειτουργία φόντου (για το κλασικό template)").pack(
             anchor="w", pady=(4, 3))
@@ -416,7 +897,6 @@ class WelcomeMixin:
         ttk.Checkbutton(p2, text="Γέμισμα κάδρου με crop στις άκρες της εικόνας",
                         variable=cropping_var).pack(anchor="w", pady=(10, 0))
 
-        # --------------------------- step 3: pacing and transitions
         p3 = pages[2]
         ttk.Label(p3, text="Προεπιλεγμένη διάρκεια φωτογραφίας (δευτερόλεπτα)").pack(
             anchor="w", pady=(12, 3))
@@ -519,3 +999,4 @@ class WelcomeMixin:
         show_step(0)
         name_entry.focus_set()
         return dialog
+

@@ -48,37 +48,23 @@ class PreviewMixin:
 
     def _preview_task(self):
         try:
+            if not getattr(self, "media_files", None):
+                self._post_ui(self._clear_preview, self.preview_canvas)
+                return
             res = self.settings["resolution"].split('x')
             w, h = int(res[0]), int(res[1])
-            photo_item = next((it for it in self.media_files if it[0] == "image"), None)
-            video_item = next((it for it in self.media_files if it[0] == "video"), None)
-            active_scene = getattr(self, "_active_presentation_scene_id", None)
-            if active_scene:
-                active_item = next((it for it in self.media_files
-                                    if isinstance(it[2].get("presentation"), dict) and
-                                    it[2]["presentation"].get("scene_id") == active_scene), None)
-                if active_item and active_item[0] == "image":
-                    photo_item = active_item
-                elif active_item and active_item[0] == "video":
-                    video_item = active_item
-            if photo_item is None and video_item is None:
-                self._post_ui(messagebox.showinfo, "Preview", "Δεν υπάρχουν media για preview.")
-                return
-
-            if video_item is not None:
-                # For a trimmed video the export starts at trim_start, so preview that frame.
-                t_start = float(video_item[2].get("trim_start") or 0.0)
-                self._render_preview(video_item[1], "video", w, h, self.preview_video_canvas,
-                                     video_item[2], t_start)
+            selected = sorted(getattr(self, "selected_indices", set()))
+            index = selected[0] if selected else 0
+            if not (0 <= index < len(self.media_files)):
+                index = 0
+            m_type, path, edit = self.media_files[index]
+            if m_type == "video":
+                t_start = float(edit.get("trim_start") or 0.0)
+                self._render_preview(path, "video", w, h, self.preview_canvas,
+                                     edit, t_start)
             else:
-                self._post_ui(self._clear_preview, self.preview_video_canvas)
-            if photo_item is not None:
-                self._render_preview(photo_item[1], "image", w, h, self.preview_photo_canvas, photo_item[2])
-            else:
-                self._post_ui(self._clear_preview, self.preview_photo_canvas)
+                self._render_preview(path, "image", w, h, self.preview_canvas, edit)
         except Exception as e:
-            # Bind the text now: the `except ... as e` name is cleared when the
-            # block ends, so a lambda captured over `e` would fail later.
             err = str(e)
             self._post_ui(messagebox.showerror, "Error", err)
 
@@ -217,8 +203,14 @@ class PreviewMixin:
             disp = full.resize((dw, dh), Image.Resampling.LANCZOS)
             tk_p = ImageTk.PhotoImage(disp)
             canvas.delete("all")
-            canvas.create_image(cw // 2, ch // 2, image=tk_p)
+            x0 = (cw - dw) // 2
+            y0 = (ch - dh) // 2
+            canvas.create_image(x0, y0, image=tk_p, anchor="nw")
             canvas.img = tk_p   # keep a reference so it isn't garbage-collected
+            guides = getattr(self, "safe_guides_var", None)
+            if guides is not None and guides.get():
+                from .ui_widgets import draw_safe_guides
+                draw_safe_guides(canvas, (x0, y0, x0 + dw, y0 + dh))
         except tk.TclError:
             pass
 

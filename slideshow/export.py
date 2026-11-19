@@ -54,6 +54,7 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
         if getattr(self, "render_live_preview_check", None) is not None:
             self.render_live_preview_check.config(state="disabled")
         self.status.config(text="Exporting...")
+        self._export_active = True
         threading.Thread(target=self._export_task, args=(out,), daemon=True).start()
 
 
@@ -101,7 +102,7 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
     def _export_task(self, out_path):
         completed = False
         try:
-            temp_dir = self.app_dir / "temp"
+            temp_dir = self.temp_dir
             temp_dir.mkdir(exist_ok=True)
             for f in temp_dir.glob("*"):
                 try: f.unlink()
@@ -459,18 +460,22 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
             cancelled = self._export_cancel
             self._export_cancel = False
             self._export_proc = None
+            self._export_active = False
             if getattr(self, "cancel_btn", None) is not None:
                 self._post_ui(lambda: self.cancel_btn.config(state='disabled'))
             if getattr(self, "render_live_preview_check", None) is not None:
                 self._post_ui(lambda: self.render_live_preview_check.config(state="normal"))
             self._post_ui(lambda: self.status.config(text="Ready"))
             self._post_ui(self._finish_export_eta, completed, cancelled)
+            finished = getattr(self, "_export_finished", None)
+            if finished is not None:
+                self._post_ui(finished)
 
 
     def _log_export(self, msg):
         """Append a debug line to temp/export_log.txt (shows the latest export)."""
         try:
-            log = self.app_dir / "temp" / "export_log.txt"
+            log = self.temp_dir / "export_log.txt"
             with open(log, 'a', encoding='utf-8') as f:
                 f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
         except Exception:

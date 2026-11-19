@@ -9,6 +9,8 @@ dist/
 
 # Runtime data / user files (never commit - settings.json holds the AI API key)
 settings.json
+profiles.json
+profiles/
 music_tracker.json
 projects/
 music/

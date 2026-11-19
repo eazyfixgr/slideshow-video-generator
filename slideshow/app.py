@@ -32,6 +32,10 @@ from .ui_erase import EraseSettingsMixin
 from .ui_timeline import TimelineMixin
 from .ui_settings import SettingsMixin
 from .ui_layout import LayoutMixin
+from .ui_storyboard import StoryboardMixin
+from .ui_inspector import InspectorMixin
+from .ui_export_panel import ExportPanelMixin
+from .ui_profile_dialogs import ProfileDialogsMixin
 from .ui_preview import PreviewMixin
 from .ui_text import TextInputMixin
 from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
@@ -40,6 +44,10 @@ from .ui_captions import CaptionsMixin
 from .slide_design import normalize_template
 from .ui_welcome import WelcomeMixin
 from .ui_theme import ThemeMixin
+from .profiles import (active_profile as registry_active_profile, create_profile,
+                       ensure_profile_paths, get_profile, last_project_path,
+                       load_registry, save_registry, set_active,
+                       set_last_project as registry_set_last_project, update_profile)
 
 
 # Where settings.json, projects/, music/, temp/ and models/ live.
@@ -61,7 +69,7 @@ PROJECT_TRANSITIONS = {"none", "fade", "fadeblack", "fadewhite", "wipeleft", "wi
                        "wipeup", "wipedown", "smoothleft", "smoothright", "random"}
 
 
-class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, MediaRecoveryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, WelcomeMixin, ThemeMixin, SettingsMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin):
+class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, StoryboardMixin, MediaRecoveryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, ProfileDialogsMixin, WelcomeMixin, ThemeMixin, SettingsMixin, InspectorMixin, ExportPanelMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin):
     """Composes every mixin above into the one application object."""
 
     def __init__(self, root, show_welcome=True):
@@ -71,13 +79,12 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
 
         self.app_dir = APP_DIR
         self._use_local_ffmpeg()
-        self.projects_dir = self.app_dir / "projects"
-        self.settings_file = self.app_dir / "settings.json"
-        self.music_tracker_file = self.app_dir / "music_tracker.json"
-        self.temp_dir = self.app_dir / "temp"
-
-        self.projects_dir.mkdir(exist_ok=True)
-        self.temp_dir.mkdir(exist_ok=True)
+        self.profiles_data = load_registry(self.app_dir)
+        self.active_profile_id = self.profiles_data["active_profile"]
+        self.active_profile_data = registry_active_profile(self.profiles_data)
+        self._apply_profile_paths()
+        self._root_hidden_until_welcome = False
+        self._shell_poll_job = None
 
         # Tkinter is single-threaded: worker threads must never touch widgets or
         # call `after()` directly (that can crash the whole interpreter). They
@@ -255,6 +262,134 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
 
 
 
+    def _apply_profile_paths(self):
+        """Point the whole app at the active profile's workspace."""
+        paths = ensure_profile_paths(self.app_dir, self.active_profile_data)
+        self.profile_paths = paths
+        self.settings_file = paths["settings"]
+        self.projects_dir = paths["projects"]
+        self.music_tracker_file = paths["music_tracker"]
+        self.temp_dir = paths["temp"]
+
+    def _default_music_folder(self):
+        return self.profile_paths["music"]
+
+    def _default_output_folder(self):
+        return self.profile_paths["output"]
+
+    def get_active_profile(self):
+        return self.active_profile_data
+
+    def save_profile_registry(self):
+        save_registry(self.app_dir, self.profiles_data)
+
+    def switch_profile(self, profile_id):
+        """Save the current profile and reopen the app on another workspace."""
+        if profile_id == self.active_profile_id:
+            return True
+        profile = get_profile(self.profiles_data, profile_id)
+        if profile is None:
+            return False
+        try:
+            self.save_settings()
+            self.save_music_tracker()
+        except Exception:
+            pass
+        if not set_active(self.profiles_data, profile_id):
+            return False
+        self.save_profile_registry()
+        self.active_profile_id = profile_id
+        self.active_profile_data = profile
+        self._active_project_settings = False
+        self.project_settings = {}
+        self._apply_profile_paths()
+        self.load_settings()
+        self._global_settings = copy.deepcopy(self.settings)
+        self.project_template = normalize_template(
+            self.settings.get("last_caption_template", "legacy"))
+        self.apply_ui_theme()
+        self.load_music_tracker()
+        stop_play = getattr(self, "_stop_preview_play", None)
+        if stop_play:
+            stop_play()
+        self.current_project = None
+        self.media_files = []
+        self.selected_indices = set()
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self.is_modified = False
+        self._active_presentation_scene_id = None
+        if hasattr(self, "name_var"):
+            self.name_var.set("")
+            self.out_var.set(self.settings.get("output_folder", ""))
+        self._sync_caption_template_dropdown()
+        if hasattr(self, "thumb_frame"):
+            self.update_media_display()
+        self._refresh_header()
+        return True
+
+    def create_new_profile(self, name, role="", color=None):
+        profile = create_profile(self.profiles_data, self.app_dir, name, role, color)
+        self.switch_profile(profile["id"])
+        return profile
+
+    def set_last_project(self, project_path):
+        try:
+            registry_set_last_project(self.app_dir, self.profiles_data,
+                                      self.active_profile_id, project_path)
+            self.active_profile_data = get_profile(
+                self.profiles_data, self.active_profile_id) or self.active_profile_data
+        except Exception:
+            pass
+
+    def get_last_project(self):
+        return last_project_path(self.app_dir, self.active_profile_data,
+                                 self.projects_dir)
+
+    def _refresh_header(self):
+        refresh = getattr(self, "_update_header_widgets", None)
+        if refresh:
+            try:
+                refresh()
+            except tk.TclError:
+                pass
+
+    def return_to_welcome(self):
+        """Hide the editor and show the profile / recent-project screen."""
+        if self.is_modified:
+            answer = messagebox.askyesnocancel(
+                "Έναρξη",
+                "Έχεις μη αποθηκευμένες αλλαγές στο project.\n\n"
+                "Πάτα 'Yes' για αποθήκευση και επιστροφή,\n"
+                "'No' για επιστροφή χωρίς αποθήκευση,\n"
+                "'Cancel' για να μείνεις στον editor.")
+            if answer is None:
+                return False
+            if answer and not self.save_project():
+                return False
+            if not answer:
+                self.is_modified = False
+        self._save_window_state()
+        try:
+            self.save_settings()
+        except Exception:
+            pass
+        stop_play = getattr(self, "_stop_preview_play", None)
+        if stop_play:
+            stop_play()
+        export_window = getattr(self, "export_window", None)
+        if export_window is not None:
+            try:
+                export_window.withdraw()
+            except tk.TclError:
+                pass
+        try:
+            self.root.withdraw()
+        except tk.TclError:
+            pass
+        self.show_welcome_screen()
+        return True
+
     def _use_local_ffmpeg(self):
         """Prefer a bundled FFmpeg placed next to the app by install.ps1.
 
@@ -279,13 +414,14 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
             "cropping": False, "font_size": 32, "font_family": "Calibri",
             "text_style": "black_box", "auto_position_photos": False,
             "auto_position_videos": False, "mute_video_audio": True,
-            "output_folder": str(self.app_dir), "slide_duration": 3,
+            "output_folder": str(self._default_output_folder()), "slide_duration": 3,
             "export_quality": "high", "facebook_target_mb": 95,
             "last_caption_template": "legacy",
             "last_caption_template_is_global": False,
             "auto_position_videos_is_global": False,
             "render_live_preview": False,
-            "music_folder": str(self.app_dir / "music"), "crossfade_duration": 3, "trim_silence": True,
+            "music_folder": str(self._default_music_folder()), "crossfade_duration": 3,
+            "trim_silence": True,
             "transition_effect": "fade", "transition_duration": 0.7, "random_transitions": [],
             "watermark_enabled": False, "watermark_path": "", "watermark_position": "bottom_right",
             "watermark_size_pct": 15, "watermark_opacity": 80,
@@ -326,7 +462,13 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
         else:
             self.settings = default_settings
             self.save_settings()
-        os.makedirs(self.settings["music_folder"], exist_ok=True)
+        for key in ("music_folder", "output_folder"):
+            value = self.settings.get(key)
+            if isinstance(value, str) and value:
+                try:
+                    os.makedirs(value, exist_ok=True)
+                except OSError:
+                    pass
 
 
     def save_settings(self):
@@ -343,8 +485,10 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
         else:
             stored = self.settings
             self._global_settings = copy.deepcopy(self.settings)
-        with open(self.settings_file, 'w', encoding='utf-8') as f:
+        temp_file = self.settings_file.with_name(self.settings_file.name + ".tmp")
+        with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(stored, f, indent=2)
+        os.replace(temp_file, self.settings_file)
 
 
     def _capture_project_settings(self):
@@ -461,8 +605,10 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
 
 
     def save_music_tracker(self):
-        with open(self.music_tracker_file, 'w', encoding='utf-8') as f:
+        temp_file = self.music_tracker_file.with_name(self.music_tracker_file.name + ".tmp")
+        with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(self.music_tracker, f, indent=2)
+        os.replace(temp_file, self.music_tracker_file)
 
 
     def refresh_music_list(self, silent=False):
@@ -504,12 +650,17 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
 
 
     def new_project(self):
+        stop_play = getattr(self, "_stop_preview_play", None)
+        if stop_play:
+            stop_play()
         if hasattr(self, "_global_settings"):
             for key in PROJECT_SETTING_KEYS:
                 if key in self._global_settings:
                     self.settings[key] = copy.deepcopy(self._global_settings[key])
         self._active_project_settings = False
         self.project_settings = {}
+        self.current_project = None
+        self._active_presentation_scene_id = None
         self.name_var.set("")
         self.out_var.set(self.settings.get("output_folder", ""))
         self.media_files = []
@@ -530,7 +681,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.selected_indices = set()
+        self.is_modified = False
         self.update_media_display()
+        self._refresh_header()
 
 
     def save_project(self):
@@ -576,14 +729,19 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
         }
         p = self.projects_dir / f"{safe}.json"
         try:
-            with open(p, 'w', encoding='utf-8') as f:
+            temp_file = p.with_name(p.name + ".tmp")
+            with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(temp_file, p)
         except OSError as e:
             messagebox.showerror("Σφάλμα", f"Δεν μπόρεσα να αποθηκεύσω το project:\n{e}")
             return False
         self.project_settings = copy.deepcopy(data["project_settings"])
         self._active_project_settings = bool(self.project_settings)
         self.is_modified = False
+        self.current_project = p
+        self.set_last_project(p)
+        self._refresh_header()
         messagebox.showinfo("Saved", "Project saved.")
         return True
 
@@ -769,6 +927,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
                                  f"Δεν μπόρεσα να φορτώσω το project '{path.stem}':\n{exc}")
             return False
 
+        stop_play = getattr(self, "_stop_preview_play", None)
+        if stop_play:
+            stop_play()
         if hasattr(self, "_global_settings"):
             for key in PROJECT_SETTING_KEYS:
                 if key in self._global_settings:
@@ -804,6 +965,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
         self._redo_stack.clear()
         self.selected_indices = set()
         missing_media = self._resolve_existing_project_media(project_path)
+        self.current_project = path
+        self.set_last_project(path)
+        self._refresh_header()
         if missing_media:
             if on_loaded:
                 on_loaded()
@@ -819,6 +983,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Media
         self._save_window_state()
         try:
             self.save_settings()
+            self.save_music_tracker()
+            self.save_profile_registry()
         except Exception:
             pass
         if not self.is_modified:

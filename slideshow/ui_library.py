@@ -13,6 +13,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 
 from .deps import Image, ImageTk
 from .slide_design import has_presentation_settings
+from .ui_theme import MODERN_PALETTE as P
 
 
 class LibraryMixin:
@@ -34,6 +35,7 @@ class LibraryMixin:
         self.selected_indices = set()
         self.is_modified = True
         self.update_media_display()
+        self._refresh_inspector_after_media()
 
     def redo(self):
         if not self._redo_stack:
@@ -43,6 +45,7 @@ class LibraryMixin:
         self.selected_indices = set()
         self.is_modified = True
         self.update_media_display()
+        self._refresh_inspector_after_media()
 
     # ------------------------------------------------------------ adding
     def import_media(self):
@@ -108,6 +111,7 @@ class LibraryMixin:
         self.selected_indices = set()
         self.is_modified = True
         self.update_media_display()
+        self._refresh_inspector_after_media()
 
     # ---------------------------------------------------------- selection
     def _selected(self):
@@ -129,16 +133,23 @@ class LibraryMixin:
             self.selected_indices = {idx}
             self._sel_anchor = idx
         self._refresh_selection()
+        changed = getattr(self, "_selection_changed", None)
+        if changed:
+            changed()
 
     def _refresh_selection(self):
         mode = self.view_mode.get()
-        for i, w in enumerate(getattr(self, "_item_widgets", [])):
-            sel = i in self.selected_indices
+        indices = getattr(self, "_widget_indices", list(range(
+            len(getattr(self, "_item_widgets", [])))))
+        for position, w in enumerate(getattr(self, "_item_widgets", [])):
+            index = indices[position] if position < len(indices) else position
+            sel = index in self.selected_indices
             try:
                 if mode == "list":
-                    w.config(bg='#cfe3ff' if sel else '#eee')
+                    w.config(bg=(P["selected"] if sel else P["raised"]),
+                             fg=P["text"])
                 else:
-                    w.config(highlightbackground='#2d6cdf' if sel else '#cccccc',
+                    w.config(highlightbackground=(P["accent"] if sel else P["border"]),
                              highlightthickness=2 if sel else 1)
             except tk.TclError:
                 pass
@@ -151,15 +162,47 @@ class LibraryMixin:
             w.destroy()
         self.thumbnails = []
         self._item_widgets = []
+        filter_value = (self.library_filter_var.get()
+                        if hasattr(self, "library_filter_var") else "all")
+        visible = [(i, item) for i, item in enumerate(self.media_files)
+                   if filter_value == "all" or item[0] == filter_value]
+        self._widget_indices = [i for i, _item in visible]
         if self.view_mode.get() == "list":
-            self._build_list()
+            self._build_list(visible)
         else:
-            self._build_icons()
+            self._build_icons(visible)
         self._refresh_selection()
+        if not visible:
+            empty = tk.Frame(self.thumb_frame, bg=P["panel"], padx=10, pady=14)
+            empty.pack(fill="x", padx=6, pady=10)
+            if not self.media_files:
+                text = "Η βιβλιοθήκη είναι άδεια.\nΠρόσθεσε φωτογραφίες ή βίντεο."
+            else:
+                text = "Δεν υπάρχουν στοιχεία σε αυτό το φίλτρο."
+            tk.Label(empty, text=text, bg=P["panel"], fg=P["muted"],
+                     font=("Segoe UI", 9), justify="left", anchor="w",
+                     wraplength=200).pack(anchor="w")
+            if not self.media_files:
+                tk.Button(empty, text="+  Προσθήκη media", command=self.import_media,
+                          bg=P["accent"], fg=P["accent_text"], activebackground=P["accent"],
+                          activeforeground=P["accent_text"], relief="flat", bd=0,
+                          font=("Segoe UI", 8, "bold"), padx=10, pady=5,
+                          cursor="hand2").pack(anchor="w", pady=(8, 0))
+        count_var = getattr(self, "library_count_var", None)
+        if count_var is not None:
+            total = len(self.media_files)
+            count_var.set(f"{len(visible)} / {total}" if filter_value != "all"
+                          else f"{total} {'σκηνή' if total == 1 else 'σκηνές'}")
         self._schedule_preview()
         refresh_estimate = getattr(self, "_refresh_export_estimate", None)
         if refresh_estimate:
             refresh_estimate()
+        storyboard = getattr(self, "render_storyboard", None)
+        if storyboard:
+            storyboard()
+        stage = getattr(self, "_refresh_stage", None)
+        if stage:
+            stage()
 
     def _media_duration(self, m_type, path):
         if m_type != "video":
@@ -172,29 +215,33 @@ class LibraryMixin:
             except Exception:
                 d = 0.0
             self._video_dur_cache[key] = d
-        return f"  ⏱ {self._tl_mmss(d)}" if d and d > 0 else ""
+        return f"  ·  {self._tl_mmss(d)}" if d and d > 0 else ""
 
-    def _build_list(self):
-        for i, (t, p, ed) in enumerate(self.media_files):
+    def _build_list(self, visible):
+        for i, (t, p, ed) in visible:
             icon = "▶" if t == "video" else "▦"
             mark = "  ✎" if self.has_edit(ed) else ""
             design = "  ✦" if has_presentation_settings(
                 ed.get("presentation"), getattr(self, "project_template", "legacy")) else ""
-            text = f"{i+1}. {icon} [{t.upper()}] {Path(p).name}{self._media_duration(t, p)}{mark}{design}"
-            lbl = tk.Label(self.thumb_frame, text=text, anchor='w', bg='#eee', padx=10, pady=2)
-            lbl.pack(fill='x')
+            text = f"{i + 1:02d}  {icon}  {Path(p).name}{self._media_duration(t, p)}{mark}{design}"
+            lbl = tk.Label(self.thumb_frame, text=text, anchor='w', bg=P["raised"],
+                           fg=P["text"], padx=9, pady=5, font=("Segoe UI", 8))
+            lbl.pack(fill='x', padx=4, pady=1)
             self._item_widgets.append(lbl)
             self._bind_item(lbl, i)
             self._add_tooltip(lbl, p)
 
-    def _build_icons(self):
-        w_limit = self.media_canvas.winfo_width() - 30
-        cols = max(1, w_limit // 145) if w_limit > 100 else 4
-        for i, (t, p, ed) in enumerate(self.media_files):
-            outer = tk.Frame(self.thumb_frame, bg='#f4f4f4', bd=0,
-                             highlightthickness=1, highlightbackground='#cccccc')
-            r, c = divmod(i, cols)
-            outer.grid(row=r, column=c, padx=5, pady=5, sticky='n')
+    def _build_icons(self, visible):
+        width = self.media_canvas.winfo_width()
+        if width < 50:
+            width = 230
+        cols = max(1, min(3, (width - 8) // 104))
+        for position, (i, (t, p, ed)) in enumerate(visible):
+            outer = tk.Frame(self.thumb_frame, bg=P["raised"], bd=0,
+                             highlightthickness=1, highlightbackground=P["border"])
+            r, c = divmod(position, cols)
+            outer.grid(row=r, column=c, padx=3, pady=3, sticky='n')
+            self.thumb_frame.columnconfigure(c, weight=1)
             self._item_widgets.append(outer)
             try:
                 if t == "image":
@@ -203,32 +250,33 @@ class LibraryMixin:
                     img = self._video_first_frame(p)
                 thumb_edit = {k: v for k, v in ed.items() if k != "erase"}
                 img = self._apply_image_edit(img.copy(), thumb_edit, p, m_type=t)
-                img.thumbnail((120, 120))
+                img.thumbnail((96, 72))
                 tk_img = ImageTk.PhotoImage(img)
                 self.thumbnails.append(tk_img)
-                lbl = tk.Label(outer, image=tk_img, bg="black")
+                lbl = tk.Label(outer, image=tk_img, bg=P["stage"])
                 lbl.pack(padx=1, pady=1)
-                tk.Label(outer, text=str(i + 1), font=("Calibri", 9, "bold"),
-                         fg="#111", bg="#ffcc00", padx=5).place(x=2, y=2)
+                tk.Label(outer, text=str(i + 1), font=("Segoe UI", 8, "bold"),
+                         fg=P["accent_text"], bg=P["accent"], padx=4).place(x=3, y=3)
                 if t == "video":
-                    tk.Label(outer, text="▶ VIDEO", font=("Calibri", 7, "bold"),
-                             fg="white", bg="#c0392b", padx=3).place(relx=1.0, x=-2, y=2, anchor='ne')
+                    tk.Label(outer, text="▶", font=("Segoe UI", 8, "bold"),
+                             fg=P["danger"], bg=P["stage"], padx=3).place(
+                        relx=1.0, x=-3, y=3, anchor='ne')
                     dur = self._media_duration(t, p)
                     if dur:
-                        tk.Label(outer, text=dur.strip(), font=("Calibri", 7, "bold"),
-                                 fg="white", bg="#333", padx=3).place(
-                            relx=0.0, rely=1.0, x=2, y=-2, anchor='sw')
+                        tk.Label(outer, text=dur.strip(" ·"), font=("Segoe UI", 7),
+                                 fg=P["text"], bg=P["stage"], padx=3).place(
+                            relx=0.0, rely=1.0, x=3, y=-3, anchor='sw')
                 if self.has_edit(ed):
-                    tk.Label(outer, text="✎", font=("Calibri", 9, "bold"),
-                             fg="white", bg="#2d6cdf", padx=4).place(
-                        relx=1.0, x=-2, rely=1.0, y=-2, anchor='se')
+                    tk.Label(outer, text="✎", font=("Segoe UI", 8, "bold"),
+                             fg=P["text"], bg=P["selected"], padx=3).place(
+                        relx=1.0, x=-3, rely=1.0, y=-3, anchor='se')
                 if has_presentation_settings(
                         ed.get("presentation"), getattr(self, "project_template", "legacy")):
-                    tk.Label(outer, text="✦", font=("Calibri", 10, "bold"),
-                             fg="white", bg="#7d3c98", padx=4).place(
-                        relx=0.0, x=2, rely=1.0, y=-2, anchor='sw')
+                    tk.Label(outer, text="✦", font=("Segoe UI", 8, "bold"),
+                             fg=P["good"], bg=P["stage"], padx=3).place(
+                        relx=1.0, x=-3, rely=1.0, y=-19, anchor='se')
             except Exception:
-                tk.Label(outer, text="Error").pack()
+                tk.Label(outer, text="Error", bg=P["raised"], fg=P["muted"]).pack()
             self._bind_tree(outer, i)
             self._add_tooltip(outer, p)
 
@@ -268,30 +316,37 @@ class LibraryMixin:
 
     def _index_at_pointer(self, xr, yr):
         best, bd = None, float("inf")
-        for i, w in enumerate(getattr(self, "_item_widgets", [])):
+        indices = getattr(self, "_widget_indices", [])
+        for position, w in enumerate(getattr(self, "_item_widgets", [])):
+            index = indices[position] if position < len(indices) else position
             try:
                 x, y = w.winfo_rootx(), w.winfo_rooty()
                 ww, hh = w.winfo_width(), w.winfo_height()
             except tk.TclError:
                 continue
             if x <= xr <= x + ww and y <= yr <= y + hh:
-                return i
+                return index
             cx, cy = x + ww / 2, y + hh / 2
             dist = (xr - cx) ** 2 + (yr - cy) ** 2
             if dist < bd:
-                bd, best = dist, i
+                bd, best = dist, index
         return best
 
     def _show_drop_marker(self, tgt):
         mode = self.view_mode.get()
-        for i, w in enumerate(getattr(self, "_item_widgets", [])):
+        indices = getattr(self, "_widget_indices", [])
+        for position, w in enumerate(getattr(self, "_item_widgets", [])):
+            index = indices[position] if position < len(indices) else position
             try:
                 if mode == "list":
-                    w.config(bg='#ffe9a8' if i == tgt else
-                             ('#cfe3ff' if i in self.selected_indices else '#eee'))
+                    w.config(bg=(P["accent_faint"] if index == tgt else
+                                 (P["selected"] if index in self.selected_indices
+                                  else P["raised"])))
                 else:
-                    w.config(highlightbackground='#e67e22' if i == tgt else
-                             ('#2d6cdf' if i in self.selected_indices else '#cccccc'))
+                    w.config(highlightbackground=(P["accent"] if index == tgt else
+                                                 (P["accent_faint"]
+                                                  if index in self.selected_indices
+                                                  else P["border"])))
             except tk.TclError:
                 pass
 
@@ -313,6 +368,7 @@ class LibraryMixin:
         self._sel_anchor = min(self.selected_indices) if self.selected_indices else None
         self.is_modified = True
         self.update_media_display()
+        self._refresh_inspector_after_media()
 
     # ----------------------------------------------------------- tooltips
     def _add_tooltip(self, widget, path):
@@ -325,8 +381,9 @@ class LibraryMixin:
                 x = widget.winfo_rootx() + 12
                 y = widget.winfo_rooty() + widget.winfo_height() + 4
                 self._tooltip.wm_geometry(f"+{x}+{y}")
-                tk.Label(self._tooltip, text=Path(path).name, bg="#ffffe0",
-                         relief='solid', borderwidth=1, padx=4, pady=2).pack()
+                tk.Label(self._tooltip, text=Path(path).name, bg=P["raised"],
+                         fg=P["text"], relief='solid', borderwidth=1,
+                         padx=6, pady=3, font=("Segoe UI", 8)).pack()
             except Exception:
                 self._tooltip = None
 
@@ -384,6 +441,7 @@ class LibraryMixin:
         self.selected_indices = set()
         self.is_modified = True
         self.update_media_display()
+        self._refresh_inspector_after_media()
 
     def delete_media(self, idx):
         self.selected_indices = {idx}
@@ -400,6 +458,7 @@ class LibraryMixin:
             self.selected_indices = {new_idx - 1}
             self.is_modified = True
             self.update_media_display()
+            self._refresh_inspector_after_media()
 
     def move_media(self, idx, d):
         sel = sorted(self._selected() or [idx])
@@ -422,3 +481,4 @@ class LibraryMixin:
             self.selected_indices = {i + 1 for i in sel}
         self.is_modified = True
         self.update_media_display()
+        self._refresh_inspector_after_media()

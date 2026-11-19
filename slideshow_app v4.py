@@ -32,7 +32,7 @@ def main():
 
     splash = tk.Toplevel(root)
     splash.overrideredirect(True)
-    splash.configure(bg="#202127")
+    splash.configure(bg="#101319")
     try:
         splash.attributes("-topmost", True)
     except tk.TclError:
@@ -42,13 +42,13 @@ def main():
     y = max(0, (splash.winfo_screenheight() - height) // 2)
     splash.geometry(f"{width}x{height}+{x}+{y}")
 
-    card = tk.Frame(splash, bg="#202127", padx=34, pady=30)
+    card = tk.Frame(splash, bg="#101319", padx=34, pady=30)
     card.pack(fill="both", expand=True)
-    tk.Label(card, text="SLIDESHOW", bg="#202127", fg="#d6b86a",
+    tk.Label(card, text="SLIDESHOW", bg="#101319", fg="#e8bd79",
              font=("Segoe UI", 11, "bold")).pack(anchor="w")
-    tk.Label(card, text="Video Creator Pro", bg="#202127", fg="#f2f2f2",
+    tk.Label(card, text="Video Creator Pro", bg="#101319", fg="#f1f3f7",
              font=("Segoe UI", 24, "bold")).pack(anchor="w", pady=(3, 4))
-    status = tk.Label(card, text="Φόρτωση εφαρμογής…", bg="#202127", fg="#b8bbc2",
+    status = tk.Label(card, text="Φόρτωση εφαρμογής…", bg="#101319", fg="#9da9b9",
                       font=("Segoe UI", 10))
     status.pack(anchor="w", pady=(0, 20))
     style = ttk.Style(root)
@@ -56,9 +56,9 @@ def main():
         style.theme_use("clam")
     except tk.TclError:
         pass
-    style.configure("Splash.Horizontal.TProgressbar", troughcolor="#34363d",
-                    background="#d6b86a", bordercolor="#202127", lightcolor="#d6b86a",
-                    darkcolor="#d6b86a")
+    style.configure("Splash.Horizontal.TProgressbar", troughcolor="#12161d",
+                    background="#e8bd79", bordercolor="#101319", lightcolor="#e8bd79",
+                    darkcolor="#e8bd79")
     progress = ttk.Progressbar(card, mode="indeterminate", length=420,
                                style="Splash.Horizontal.TProgressbar")
     progress.pack(fill="x")

@@ -1,4 +1,4 @@
-"""A selectable modern dark or native Windows appearance for the Tk UI."""
+"""The app's dark design system and a native Windows fallback theme."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -6,22 +6,32 @@ from tkinter import ttk
 
 THEMES = {"Modern Dark": "modern", "Classic Windows": "classic"}
 
-_MODERN = {
-    "background": "#202127",
-    "panel": "#292b31",
-    "field": "#34363d",
-    "text": "#f2f2f2",
-    "muted": "#b8bbc2",
-    "accent": "#d6b86a",
-    "selected": "#444b59",
-    "border": "#41434a",
+MODERN_PALETTE = {
+    "background": "#101319",
+    "panel": "#171b22",
+    "raised": "#1d232c",
+    "field": "#12161d",
+    "text": "#f1f3f7",
+    "muted": "#9da9b9",
+    "accent": "#e8bd79",
+    "accent_text": "#1b160d",
+    "accent_faint": "#2b2619",
+    "good": "#84c5a5",
+    "danger": "#e89a8f",
+    "selected": "#252c36",
+    "border": "#2a313d",
+    "line": "#2a313d",
+    "stage": "#0b0e13",
 }
+_MODERN = MODERN_PALETTE
+
 _NEUTRAL_BACKGROUNDS = {
     "white", "#fff", "#ffffff", "#eee", "#eeeeee", "#f0f0f0", "#f4f4f4",
-    "#d9d9d9", "systembuttonface", "systemwindow", "systemwindowframe",
+    "#d9d9d9", "#f2f2f2", "systembuttonface", "systemwindow", "systemwindowframe",
 }
 _MODERN_BACKGROUNDS = {value.lower() for key, value in _MODERN.items()
-                       if key in {"background", "panel", "field", "selected", "border"}}
+                       if key in {"background", "panel", "raised", "field", "selected",
+                                  "border", "line", "accent_faint"}}
 _MODERN_FOREGROUNDS = {_MODERN["text"].lower(), _MODERN["muted"].lower()}
 
 
@@ -44,6 +54,12 @@ class ThemeMixin:
             self.root.option_add("*Background", palette["background"])
             self.root.option_add("*Foreground", palette["text"])
             self.root.option_add("*insertBackground", palette["text"])
+            self.root.option_add("*selectBackground", palette["selected"])
+            self.root.option_add("*selectForeground", palette["text"])
+            self.root.option_add("*Menu.background", palette["panel"])
+            self.root.option_add("*Menu.foreground", palette["text"])
+            self.root.option_add("*Menu.activeBackground", palette["selected"])
+            self.root.option_add("*Menu.activeForeground", palette["text"])
         else:
             available = set(style.theme_names())
             native = next((name for name in ("vista", "xpnative", "winnative", "clam")
@@ -72,50 +88,150 @@ class ThemeMixin:
         style.configure(".", background=p["background"], foreground=p["text"],
                         font=("Segoe UI", 10))
         style.configure("TFrame", background=p["background"])
+        style.configure("Panel.TFrame", background=p["panel"])
+        style.configure("Card.TFrame", background=p["raised"])
+        style.configure("Stage.TFrame", background=p["stage"])
         style.configure("TLabel", background=p["background"], foreground=p["text"])
+        style.configure("Panel.TLabel", background=p["panel"], foreground=p["text"])
+        style.configure("Card.TLabel", background=p["raised"], foreground=p["text"])
         style.configure("Muted.TLabel", background=p["background"], foreground=p["muted"])
+        style.configure("PanelMuted.TLabel", background=p["panel"], foreground=p["muted"])
+        style.configure("Eyebrow.TLabel", background=p["panel"], foreground=p["muted"],
+                        font=("Segoe UI", 8, "bold"))
+        style.configure("Title.TLabel", background=p["background"], foreground=p["text"],
+                        font=("Segoe UI", 15, "bold"))
+        style.configure("PanelTitle.TLabel", background=p["panel"], foreground=p["text"],
+                        font=("Segoe UI", 12, "bold"))
+        style.configure("Section.TLabel", background=p["panel"], foreground=p["text"],
+                        font=("Segoe UI", 9, "bold"))
+        style.configure("Accent.TLabel", background=p["background"], foreground=p["accent"],
+                        font=("Segoe UI", 9, "bold"))
+        style.configure("PanelAccent.TLabel", background=p["panel"], foreground=p["accent"],
+                        font=("Segoe UI", 9, "bold"))
+        style.configure("Good.TLabel", background=p["panel"], foreground=p["good"])
+        style.configure("Danger.TLabel", background=p["panel"], foreground=p["danger"])
         style.configure("TLabelframe", background=p["background"], foreground=p["text"],
                         bordercolor=p["border"])
         style.configure("TLabelframe.Label", background=p["background"], foreground=p["text"])
-        style.configure("TButton", background=p["panel"], foreground=p["text"],
-                        bordercolor=p["border"], padding=(11, 6), focuscolor=p["accent"])
-        style.map("TButton", background=[("pressed", p["accent"]), ("active", p["selected"])],
-                  foreground=[("pressed", "#17181b")])
+        style.configure("TButton", background=p["raised"], foreground=p["text"],
+                        bordercolor=p["border"], padding=(11, 6), focuscolor=p["accent"],
+                        lightcolor=p["border"], darkcolor=p["border"],
+                        font=("Segoe UI", 9))
+        style.map("TButton", background=[("pressed", p["accent"]),
+                                         ("active", p["selected"]),
+                                         ("disabled", p["field"])],
+                  foreground=[("pressed", p["accent_text"]),
+                              ("disabled", p["muted"])],
+                  lightcolor=[("active", p["border"]), ("pressed", p["accent"])],
+                  darkcolor=[("active", p["border"]), ("pressed", p["accent"])],
+                  bordercolor=[("focus", p["accent"]), ("active", p["border"])])
+        style.configure("Accent.TButton", background=p["accent"], foreground=p["accent_text"],
+                        bordercolor=p["accent"], padding=(14, 7),
+                        font=("Segoe UI", 9, "bold"))
+        style.map("Accent.TButton",
+                  background=[("pressed", "#f3d39b"), ("active", "#f0ca8c"),
+                              ("disabled", p["field"])],
+                  foreground=[("pressed", p["accent_text"]),
+                              ("disabled", p["muted"])])
+        style.configure("Quiet.TButton", background=p["panel"], foreground=p["muted"],
+                        bordercolor=p["panel"], padding=(9, 5), font=("Segoe UI", 9))
+        style.map("Quiet.TButton", background=[("active", p["selected"])],
+                  foreground=[("active", p["text"]), ("disabled", p["border"])])
         style.configure("TEntry", fieldbackground=p["field"], foreground=p["text"],
-                        insertcolor=p["text"], bordercolor=p["border"])
-        style.configure("TSpinbox", background=p["panel"], fieldbackground=p["field"],
+                        insertcolor=p["text"], bordercolor=p["border"],
+                        lightcolor=p["border"], darkcolor=p["border"],
+                        focuscolor=p["accent"], padding=6)
+        style.configure("Field.TEntry", fieldbackground=p["field"], foreground=p["text"],
+                        insertcolor=p["text"], bordercolor=p["border"],
+                        lightcolor=p["border"], darkcolor=p["border"],
+                        focuscolor=p["accent"], padding=7)
+        style.map("TEntry",
+                  bordercolor=[("focus", p["accent"]), ("!focus", p["border"])],
+                  lightcolor=[("focus", p["accent"]), ("!focus", p["border"])],
+                  darkcolor=[("focus", p["accent"]), ("!focus", p["border"])],
+                  fieldbackground=[("disabled", p["panel"])],
+                  foreground=[("disabled", p["muted"])])
+        style.configure("TSpinbox", background=p["raised"], fieldbackground=p["field"],
                         foreground=p["text"], arrowcolor=p["text"],
-                        insertcolor=p["text"], bordercolor=p["border"])
+                        insertcolor=p["text"], bordercolor=p["border"],
+                        lightcolor=p["border"], darkcolor=p["border"],
+                        focuscolor=p["accent"])
         style.map("TSpinbox", fieldbackground=[("readonly", p["field"]),
                                                 ("disabled", p["panel"])],
                   foreground=[("readonly", p["text"]), ("disabled", p["muted"])],
+                  lightcolor=[("focus", p["accent"]), ("!focus", p["border"])],
+                  darkcolor=[("focus", p["accent"]), ("!focus", p["border"])],
                   arrowcolor=[("disabled", p["muted"]), ("pressed", p["accent"]),
                               ("active", p["text"])])
         style.configure("TCombobox", fieldbackground=p["field"], foreground=p["text"],
-                        arrowcolor=p["text"], bordercolor=p["border"])
+                        arrowcolor=p["text"], bordercolor=p["border"],
+                        lightcolor=p["border"], darkcolor=p["border"],
+                        focuscolor=p["accent"], padding=5)
         style.map("TCombobox", fieldbackground=[("readonly", p["field"])],
-                  foreground=[("readonly", p["text"])])
+                  foreground=[("readonly", p["text"])],
+                  lightcolor=[("focus", p["accent"]), ("!focus", p["border"])],
+                  darkcolor=[("focus", p["accent"]), ("!focus", p["border"])],
+                  arrowcolor=[("active", p["accent"])])
         style.configure("TCheckbutton", background=p["background"], foreground=p["text"],
-                         indicatorcolor=p["field"])
+                        indicatorbackground=p["field"],
+                        indicatorforeground=p["accent"],
+                        upperbordercolor=p["border"], lowerbordercolor=p["border"])
         style.map("TCheckbutton", background=[("active", p["selected"])],
                   foreground=[("disabled", p["muted"]), ("active", p["text"])],
-                  indicatorcolor=[("disabled", p["panel"]), ("pressed", p["accent"]),
-                                  ("selected", p["accent"]), ("active", p["field"])])
-        style.configure("TRadiobutton", background=p["background"], foreground=p["text"])
+                  indicatorbackground=[("disabled", p["panel"]),
+                                       ("selected", p["accent"]),
+                                       ("active", p["field"])],
+                  indicatorforeground=[("selected", p["accent_text"]),
+                                       ("disabled", p["muted"])])
+        style.configure("Panel.TCheckbutton", background=p["panel"], foreground=p["text"],
+                        indicatorbackground=p["field"],
+                        indicatorforeground=p["accent"],
+                        upperbordercolor=p["border"], lowerbordercolor=p["border"])
+        style.map("Panel.TCheckbutton", background=[("active", p["selected"])],
+                  foreground=[("disabled", p["muted"]), ("active", p["text"])],
+                  indicatorbackground=[("disabled", p["panel"]),
+                                       ("selected", p["accent"]),
+                                       ("active", p["field"])],
+                  indicatorforeground=[("selected", p["accent_text"])])
+        style.configure("TRadiobutton", background=p["background"], foreground=p["text"],
+                        indicatorbackground=p["field"],
+                        indicatorforeground=p["accent"],
+                        upperbordercolor=p["border"], lowerbordercolor=p["border"])
+        style.configure("Panel.TRadiobutton", background=p["panel"], foreground=p["text"],
+                        indicatorbackground=p["field"],
+                        indicatorforeground=p["accent"],
+                        upperbordercolor=p["border"], lowerbordercolor=p["border"])
+        style.map("Panel.TRadiobutton", background=[("active", p["selected"])],
+                  indicatorbackground=[("selected", p["accent"]),
+                                       ("active", p["field"])],
+                  indicatorforeground=[("selected", p["accent_text"])])
         style.configure("TNotebook", background=p["background"], borderwidth=0)
         style.configure("TNotebook.Tab", background=p["panel"], foreground=p["muted"],
                         padding=(12, 7))
         style.map("TNotebook.Tab", background=[("selected", p["accent"]),
                                                 ("active", p["selected"])],
-                  foreground=[("selected", "#17181b")])
+                  foreground=[("selected", p["accent_text"])])
         style.configure("Treeview", background=p["field"], fieldbackground=p["field"],
-                        foreground=p["text"], rowheight=26)
+                        foreground=p["text"], rowheight=26, bordercolor=p["border"])
         style.map("Treeview", background=[("selected", p["selected"])])
-        style.configure("TScrollbar", background=p["panel"], troughcolor=p["background"],
-                        bordercolor=p["background"], arrowcolor=p["muted"])
+        for scrollbar_style in ("TScrollbar", "Vertical.TScrollbar",
+                                "Horizontal.TScrollbar"):
+            style.configure(scrollbar_style, background=p["raised"],
+                            troughcolor=p["background"], bordercolor=p["background"],
+                            arrowcolor=p["muted"], lightcolor=p["raised"],
+                            darkcolor=p["raised"], gripcount=0, arrowsize=12)
         style.configure("Horizontal.TProgressbar", background=p["accent"],
-                        troughcolor=p["panel"], bordercolor=p["border"])
+                        troughcolor=p["field"], bordercolor=p["border"])
+        style.configure("Horizontal.TScale", background=p["accent"],
+                        troughcolor=p["field"], bordercolor=p["border"],
+                        lightcolor=p["accent"], darkcolor=p["accent"],
+                        sliderrelief="flat", gripcount=0)
+        style.map("Horizontal.TScale",
+                  background=[("active", p["accent"]), ("pressed", p["accent"])],
+                  troughcolor=[("active", p["field"])])
         style.configure("TSeparator", background=p["border"])
+        style.configure("TPanedwindow", background=p["border"])
+        style.configure("Sash", background=p["border"], sashthickness=6)
 
     def _theme_mapped(self, event):
         widget = event.widget

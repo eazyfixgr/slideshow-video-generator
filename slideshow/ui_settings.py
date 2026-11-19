@@ -19,15 +19,19 @@ from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhan
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
 from .ui_color_controls import ColorControls
+from .ui_theme import MODERN_PALETTE as P
 
 
 class SettingsMixin:
     """The Settings menus and the watermark/logo dialogs."""
 
     def setup_menu(self):
-        menubar = tk.Menu(self.root)
+        menu_style = dict(tearoff=0, bd=0, bg=P["panel"], fg=P["text"],
+                          activebackground=P["selected"], activeforeground=P["text"])
+        menubar = tk.Menu(self.root, bg=P["panel"], fg=P["text"],
+                          activebackground=P["selected"], activeforeground=P["text"])
         self.root.config(menu=menubar)
-        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu = tk.Menu(menubar, **menu_style)
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="New Project", command=self.new_project)
         file_menu.add_command(label="New Project Wizard...",
@@ -39,10 +43,14 @@ class SettingsMixin:
         file_menu.add_command(label="Captions...", command=self.open_text_captions_manager)
         file_menu.add_command(label="Slide Design / Project Templates...",
                               command=self.open_storyboard_editor)
-        file_menu.add_command(label="Welcome / Recent Projects...",
-                              command=self.open_recent_projects)
+        file_menu.add_separator()
+        file_menu.add_command(label="Νέο προφίλ...", command=self.open_new_profile_dialog)
+        file_menu.add_command(label="Επεξεργασία ενεργού προφίλ...",
+                              command=self.open_edit_profile_dialog)
+        file_menu.add_command(label="Έναρξη / Πρόσφατα projects...",
+                              command=self.return_to_welcome)
         
-        settings_menu = tk.Menu(menubar, tearoff=0)
+        settings_menu = tk.Menu(menubar, **menu_style)
         menubar.add_cascade(label="Settings", menu=settings_menu)
         settings_menu.add_command(label="Audio & Music Settings", command=self.show_audio_settings)
         settings_menu.add_command(label="Video Settings", command=self.show_video_settings)
