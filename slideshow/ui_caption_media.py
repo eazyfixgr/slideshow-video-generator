@@ -550,6 +550,7 @@ class MediaCaptionMixin:
                     self.project_caption_mode = "by_type"
                 self.is_modified = True
                 self._schedule_preview(450)
+                self._sync_captions_inspector()
             schedule_preview()
 
         def apply_shared_to_all():

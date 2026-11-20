@@ -72,6 +72,7 @@ class InspectorMixin:
                 pass
         for child in self.inspector_content.winfo_children():
             child.destroy()
+        self._inspector_caption_refs = None
         scroller = ScrollFrame(self.inspector_content, background=P["panel"])
         scroller.pack(fill="both", expand=True)
         body = tk.Frame(scroller.body, bg=P["panel"], padx=14, pady=6)
@@ -106,6 +107,30 @@ class InspectorMixin:
         tk.Label(box, text=text, bg=P["raised"], fg=P["muted"], font=("Segoe UI", 9),
                  wraplength=250, justify="left").pack(anchor="w")
         primary_button(box, "Προσθήκη media", self.import_media).pack(anchor="w", pady=(10, 0))
+
+    def _sync_captions_inspector(self):
+        """Push changes made in the full captions editor into the side panel."""
+        refs = getattr(self, "_inspector_caption_refs", None)
+        if not refs:
+            return
+        mode = getattr(self, "project_caption_mode", "all")
+        try:
+            refs["mode_var"].set(mode)
+            refs["set_mode"](mode)
+            values = {
+                "all": getattr(self, "project_text_all", "") or "",
+                "video": getattr(self, "project_text_videos", "") or "",
+                "photo": getattr(self, "project_text_photos", "") or "",
+            }
+            for key, value in values.items():
+                widget = refs.get(key)
+                if widget is None or not widget.winfo_exists():
+                    continue
+                widget.delete("1.0", "end")
+                widget.insert("1.0", value)
+                widget.edit_reset()
+        except tk.TclError:
+            pass
 
     def _render_story_inspector(self, body):
         index, item = self._selected_item()
@@ -335,12 +360,25 @@ class InspectorMixin:
         combo.pack(fill="x")
         combo.bind("<<ComboboxSelected>>", self._on_caption_template_selected, add="+")
 
+        def open_full_editor():
+            apply_text()
+            self.open_text_captions_manager(
+                initial_strategy=getattr(self, "project_caption_mode", "all"))
+
         self._section(body, "ΠΕΡΙΣΣΟΤΕΡΑ")
         primary_button(body, "Πλήρης επεξεργασία κειμένων",
-                       self.open_text_captions_manager).pack(fill="x", pady=(2, 4))
+                       open_full_editor).pack(fill="x", pady=(2, 4))
         primary_button(body, "Presentation / Slide Design",
                        lambda: self.open_presentation_editor(self._selected_item_index())
                        if self._selected_item_index() is not None else None).pack(fill="x", pady=2)
+
+        self._inspector_caption_refs = {
+            "mode_var": mode_var,
+            "set_mode": set_mode,
+            "all": all_text,
+            "video": video_text,
+            "photo": photo_text,
+        }
 
     def _render_design_inspector(self, body):
         self.inspector_title_var.set("Slide Design")

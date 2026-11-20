@@ -299,6 +299,7 @@ class CaptionsMixin(MediaCaptionMixin):
                 self.is_modified = True
                 self._schedule_preview(450)
                 schedule_project_preview()
+                self._sync_captions_inspector()
 
         whole_text.bind("<KeyRelease>", sync_project_caption, add="+")
         bind_text(whole_text, lambda: sync_project_caption())
@@ -329,6 +330,7 @@ class CaptionsMixin(MediaCaptionMixin):
             self.is_modified = True
             self.update_media_display()
             self._schedule_preview()
+            self._sync_captions_inspector()
             whole_status.config(text=f"Caption appliqué à {len(self.media_files)} slides")
 
         # --------------------------- separated media-type caption pages
@@ -396,6 +398,7 @@ class CaptionsMixin(MediaCaptionMixin):
                 self.is_modified = True
                 self.update_media_display()
                 self._schedule_preview()
+            self._sync_captions_inspector()
 
             editor_mode_label.config(
                 text=("Ένα caption για όλο το project" if strategy == "all" else
@@ -450,6 +453,7 @@ class CaptionsMixin(MediaCaptionMixin):
                 sync_project_caption()
             self.update_media_display()
             self._schedule_preview()
+            self._sync_captions_inspector()
             self._text_captions_dialog = None
             try:
                 dialog.destroy()
