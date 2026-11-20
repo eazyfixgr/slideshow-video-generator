@@ -74,6 +74,11 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
     def __init__(self, root, show_welcome=True):
         self.root = root
+        if show_welcome:
+            try:
+                self.root.withdraw()
+            except tk.TclError:
+                pass
         self.root.title("Slideshow Video Creator Pro")
         self.root.geometry("1550x950")
 
@@ -83,7 +88,11 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.active_profile_id = self.profiles_data["active_profile"]
         self.active_profile_data = registry_active_profile(self.profiles_data)
         self._apply_profile_paths()
-        self._root_hidden_until_welcome = False
+        try:
+            self._root_hidden_until_welcome = (show_welcome or
+                                               self.root.state() == "withdrawn")
+        except tk.TclError:
+            self._root_hidden_until_welcome = bool(show_welcome)
         self._shell_poll_job = None
 
         # Tkinter is single-threaded: worker threads must never touch widgets or
@@ -239,13 +248,20 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
 
     def _restore_window_state(self):
-        """Restore the saved window geometry, then start maximized."""
+        """Restore geometry, but never map the editor behind the welcome screen."""
+        try:
+            hidden = self.root.state() == "withdrawn"
+        except tk.TclError:
+            hidden = True
         geo = self.settings.get("window_geometry")
         if geo:
             try:
                 self.root.geometry(geo)
             except tk.TclError:
                 pass
+        if hidden:
+            self._start_maximized = True
+            return
         try:
             self.root.state("zoomed")
         except tk.TclError:

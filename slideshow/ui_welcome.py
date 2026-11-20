@@ -122,6 +122,7 @@ class WelcomeMixin:
         self._root_hidden_until_welcome = False
         try:
             self.root.deiconify()
+            self.root.state("zoomed")
             self.root.lift()
             self.root.focus_force()
         except tk.TclError:
@@ -368,7 +369,7 @@ class WelcomeMixin:
             on_created=lambda _profile: self._reopen_welcome())
 
     def _build_hero(self, parent, records, last_record):
-        hero = tk.Frame(parent, bg=P["panel"], height=232, highlightthickness=1,
+        hero = tk.Frame(parent, bg=P["panel"], height=256, highlightthickness=1,
                         highlightbackground=P["border"])
         hero.grid(row=0, column=0, sticky="ew")
         hero.grid_propagate(False)
@@ -381,18 +382,21 @@ class WelcomeMixin:
                  fg=P["accent"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
         name = self.active_profile_data.get("name", "").split()
         greeting = name[0] if name else "καλώς ήρθες"
+        greeting_size = 22 if len(greeting) <= 18 else 20 if len(greeting) <= 26 else 18
         tk.Label(content, text=f"Καλώς ήρθες, {greeting}", bg=P["panel"], fg=P["text"],
-                 font=("Segoe UI", 24, "bold")).pack(anchor="w", pady=(4, 2))
+                 font=("Segoe UI", greeting_size, "bold"), wraplength=470,
+                 justify="left", anchor="w").pack(anchor="w", pady=(4, 2))
         role = self.active_profile_data.get("role", "")
         description = (f"{role} · " if role else "") + \
                       "Φτιάξε εντυπωσιακά βίντεο από τις φωτογραφίες σου."
         tk.Label(content, text=description, bg=P["panel"], fg=P["muted"],
-                 font=("Segoe UI", 9), wraplength=330, justify="left").pack(anchor="w")
+                 font=("Segoe UI", 9), wraplength=470, justify="left",
+                 anchor="w").pack(anchor="w")
         last_text = (f"Τελευταίο project: {last_record['name']}" if last_record else
                      "Ξεκίνα το πρώτο σου project σε αυτό το προφίλ.")
         tk.Label(content, text=last_text, bg=P["panel"], fg=P["muted"],
-                 font=("Segoe UI", 8), wraplength=330, justify="left").pack(
-            anchor="w", pady=(10, 0))
+                 font=("Segoe UI", 8), wraplength=470, justify="left",
+                 anchor="w").pack(anchor="w", pady=(10, 0))
 
         buttons = tk.Frame(content, bg=P["panel"])
         buttons.pack(anchor="w", pady=(14, 0))
@@ -414,7 +418,7 @@ class WelcomeMixin:
                         active_background=P["selected"], font=("Segoe UI", 8),
                         padx=6, pady=8).pack(side="left", padx=(8, 0))
 
-        photo_holder = tk.Frame(hero, bg=P["panel"], width=380, height=232)
+        photo_holder = tk.Frame(hero, bg=P["panel"], width=340, height=256)
         photo_holder.grid(row=0, column=1, sticky="nsew")
         photo_holder.pack_propagate(False)
         photo_label = tk.Label(photo_holder, bg=P["panel"])
@@ -453,9 +457,9 @@ class WelcomeMixin:
                 except Exception:
                     image = None
             try:
-                composed = hero_image(image, 380, 232, P["panel"], fade=0.6)
+                composed = hero_image(image, 340, 256, P["panel"], fade=0.6)
             except Exception:
-                composed = placeholder_cover(380, 232, initials(
+                composed = placeholder_cover(340, 256, initials(
                     self.active_profile_data.get("name")), P["accent"])
             self._post_ui(apply, composed)
 
