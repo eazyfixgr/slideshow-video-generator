@@ -301,6 +301,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
     def switch_profile(self, profile_id):
         """Save the current profile and reopen the app on another workspace."""
+        self._commit_pending_caption_apply()
         if profile_id == self.active_profile_id:
             return True
         profile = get_profile(self.profiles_data, profile_id)
@@ -670,6 +671,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
 
     def new_project(self):
+        self._commit_pending_caption_apply()
         stop_play = getattr(self, "_stop_preview_play", None)
         if stop_play:
             stop_play()
@@ -957,6 +959,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
     def load_project_file(self, project_path, on_loaded=None):
         """Load one project directly; used by the welcome screen's recent cards."""
+        self._commit_pending_caption_apply()
         path = Path(project_path)
         try:
             with open(path, "r", encoding="utf-8-sig") as stream:

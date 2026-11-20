@@ -31,6 +31,7 @@ class LibraryMixin:
         self._redo_stack.clear()
 
     def undo(self):
+        self._commit_pending_caption_apply()
         if not self._undo_stack:
             return
         self._redo_stack.append(copy.deepcopy(self.media_files))
@@ -41,6 +42,7 @@ class LibraryMixin:
         self._refresh_inspector_after_media()
 
     def redo(self):
+        self._commit_pending_caption_apply()
         if not self._redo_stack:
             return
         self._undo_stack.append(copy.deepcopy(self.media_files))
@@ -106,6 +108,7 @@ class LibraryMixin:
             self.update_media_display()
 
     def clear_media(self):
+        self._commit_pending_caption_apply()
         if self.media_files and not messagebox.askyesno(
                 "Καθαρισμός", "Να αδειάσει όλη η βιβλιοθήκη;\n\n(Μπορείς να το αναιρέσεις με Undo)"):
             return
@@ -121,6 +124,7 @@ class LibraryMixin:
         return sorted(i for i in self.selected_indices if 0 <= i < len(self.media_files))
 
     def _select_click(self, idx, event):
+        self._commit_pending_caption_apply()
         ctrl = bool(event.state & 0x0004)
         shift = bool(event.state & 0x0001)
         if ctrl:
@@ -419,6 +423,7 @@ class LibraryMixin:
                 pass
 
     def _move_selection_to(self, target):
+        self._commit_pending_caption_apply()
         sel = self._selected()
         if not sel or target is None or target in sel:
             self._refresh_selection()
@@ -494,6 +499,7 @@ class LibraryMixin:
 
     # ------------------------------------------------------------ editing
     def delete_selected(self):
+        self._commit_pending_caption_apply()
         sel = self._selected()
         if not sel:
             if self.media_files:

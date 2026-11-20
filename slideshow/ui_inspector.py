@@ -6,6 +6,7 @@ from tkinter import ttk
 
 from .slide_design import (DEFAULT_PRESENTATION, TEMPLATES, normalize_presentation,
                            normalize_template)
+from .ui_inline_editors import InlineEditorsMixin
 from .ui_theme import MODERN_PALETTE as P
 from .ui_widgets import (ASPECTS, ScrollFrame, chip, flat_button, format_duration,
                          primary_button, resolution_for_aspect, aspect_label)
@@ -26,7 +27,7 @@ INSPECTOR_TABS = (("captions", "Captions"), ("story", "Storyboard"),
                   ("design", "Slide Design"))
 
 
-class InspectorMixin:
+class InspectorMixin(InlineEditorsMixin):
     """The right-hand inspector: scene settings, captions and slide design."""
 
     def _build_inspector(self, parent):
@@ -66,6 +67,10 @@ class InspectorMixin:
     def _render_inspector(self):
         if not hasattr(self, "inspector_content"):
             return
+        if getattr(self, "_inline_committing", False):
+            return
+        self._commit_pending_caption_apply()
+        self._caption_apply_callback = None
         view = getattr(self, "inspector_view", "captions")
         for key, button in getattr(self, "_inspector_tab_buttons", {}).items():
             try:
@@ -111,52 +116,6 @@ class InspectorMixin:
         tk.Label(box, text=text, bg=P["raised"], fg=P["muted"], font=("Segoe UI", 9),
                  wraplength=250, justify="left").pack(anchor="w")
         primary_button(box, "Προσθήκη media", self.import_media).pack(anchor="w", pady=(10, 0))
-
-    def _cancel_pending_caption_apply(self):
-        job = getattr(self, "_caption_apply_job", None)
-        self._caption_apply_job = None
-        self._caption_apply_callback = None
-        if job is not None:
-            try:
-                self.root.after_cancel(job)
-            except tk.TclError:
-                pass
-
-    def _commit_pending_caption_apply(self):
-        callback = getattr(self, "_caption_apply_callback", None)
-        if callback is None:
-            return False
-        self._cancel_pending_caption_apply()
-        try:
-            callback()
-        except tk.TclError:
-            pass
-        return True
-
-    def _sync_captions_inspector(self):
-        """Push changes made in the full captions editor into the side panel."""
-        self._cancel_pending_caption_apply()
-        refs = getattr(self, "_inspector_caption_refs", None)
-        if not refs:
-            return
-        mode = getattr(self, "project_caption_mode", "all")
-        try:
-            refs["mode_var"].set(mode)
-            refs["set_mode"](mode)
-            values = {
-                "all": getattr(self, "project_text_all", "") or "",
-                "video": getattr(self, "project_text_videos", "") or "",
-                "photo": getattr(self, "project_text_photos", "") or "",
-            }
-            for key, value in values.items():
-                widget = refs.get(key)
-                if widget is None or not widget.winfo_exists():
-                    continue
-                widget.delete("1.0", "end")
-                widget.insert("1.0", value)
-                widget.edit_reset()
-        except tk.TclError:
-            pass
 
     def _render_story_inspector(self, body):
         index, item = self._selected_item()
@@ -290,374 +249,14 @@ class InspectorMixin:
                                              lambda _e: apply_project_duration())
 
         self._section(body, "ΕΝΕΡΓΕΙΕΣ")
-        primary_button(body, "Presentation / Slide Design",
+        primary_button(body, "Slide Design",
                        lambda: self.open_presentation_editor(index)).pack(fill="x", pady=(2, 4))
-        flat_button(body, "Storyboard editor", self.open_storyboard_editor,
+        flat_button(body, "Captions", self.open_text_captions_manager,
                     background=P["raised"], foreground=P["text"],
                     active_background=P["selected"]).pack(fill="x", pady=2)
         flat_button(body, "Διαγραφή σκηνής",
                     lambda: self.delete_media(index), background=P["raised"],
                     foreground=P["danger"], active_background=P["selected"]).pack(
-            fill="x", pady=2)
-
-    def _render_captions_inspector(self, body):
-        self.inspector_title_var.set("Κείμενα project")
-        self._section(body, "ΣΤΡΑΤΗΓΙΚΗ")
-        mode_var = tk.StringVar(value=getattr(self, "project_caption_mode", "all"))
-        ttk.Radiobutton(body, text="Ένα κοινό κείμενο για όλες τις σκηνές",
-                        variable=mode_var, value="all", style="Panel.TRadiobutton",
-                        command=lambda: choose_caption_mode("all")).pack(anchor="w")
-        ttk.Radiobutton(body, text="Ξεχωριστό κείμενο για φωτογραφίες / βίντεο",
-                        variable=mode_var, value="by_type", style="Panel.TRadiobutton",
-                        command=lambda: choose_caption_mode("by_type")).pack(anchor="w")
-
-        text_holder = tk.Frame(body, bg=P["panel"])
-        text_holder.pack(fill="x", pady=(6, 0))
-        all_box = tk.Frame(text_holder, bg=P["panel"])
-        by_type_box = tk.Frame(text_holder, bg=P["panel"])
-        all_text = tk.Text(all_box, height=5, wrap="word", bg=P["field"],
-                           fg=P["text"], insertbackground=P["text"], undo=True,
-                           highlightthickness=1, highlightbackground=P["border"],
-                           font=("Segoe UI", 9), relief="flat", padx=8, pady=6)
-        all_text.pack(fill="x")
-        all_text.insert("1.0", getattr(self, "project_text_all", "") or "")
-        all_text.edit_reset()
-
-        video_text = tk.Text(by_type_box, height=4, wrap="word", bg=P["field"],
-                             fg=P["text"], insertbackground=P["text"], undo=True,
-                             highlightthickness=1, highlightbackground=P["border"],
-                             font=("Segoe UI", 9), relief="flat", padx=8, pady=6)
-        video_text.pack(fill="x", pady=(0, 6))
-        video_text.insert("1.0", getattr(self, "project_text_videos", "") or "")
-        video_text.edit_reset()
-        photo_text = tk.Text(by_type_box, height=4, wrap="word", bg=P["field"],
-                             fg=P["text"], insertbackground=P["text"], undo=True,
-                             highlightthickness=1, highlightbackground=P["border"],
-                             font=("Segoe UI", 9), relief="flat", padx=8, pady=6)
-        photo_text.pack(fill="x")
-        photo_text.insert("1.0", getattr(self, "project_text_photos", "") or "")
-        photo_text.edit_reset()
-        tk.Label(by_type_box, text="Πάνω: βίντεο · Κάτω: φωτογραφίες",
-                 bg=P["panel"], fg=P["muted"], font=("Segoe UI", 8)).pack(
-            anchor="w", pady=(3, 0))
-
-        focus_state = {"target": "all"}
-        all_text.bind("<FocusIn>", lambda _e: focus_state.update(target="all"), add="+")
-        video_text.bind("<FocusIn>", lambda _e: focus_state.update(target="video"), add="+")
-        photo_text.bind("<FocusIn>", lambda _e: focus_state.update(target="photo"), add="+")
-
-        def set_mode(value):
-            self.project_caption_mode = value
-            if value == "all":
-                by_type_box.pack_forget()
-                all_box.pack(fill="x", pady=(6, 0))
-            else:
-                all_box.pack_forget()
-                by_type_box.pack(fill="x", pady=(6, 0))
-
-        set_mode(getattr(self, "project_caption_mode", "all"))
-
-        def apply_text(*_event):
-            new_mode = mode_var.get()
-            if new_mode == "all":
-                new_all = all_text.get("1.0", "end-1c").strip()
-                new_video = new_all
-                new_photo = new_all
-            else:
-                new_all = getattr(self, "project_text_all", "") or ""
-                new_video = video_text.get("1.0", "end-1c").strip()
-                new_photo = photo_text.get("1.0", "end-1c").strip()
-            changed = (
-                new_mode != getattr(self, "project_caption_mode", "all") or
-                new_all != (getattr(self, "project_text_all", "") or "") or
-                new_video != (getattr(self, "project_text_videos", "") or "") or
-                new_photo != (getattr(self, "project_text_photos", "") or ""))
-            self.project_caption_mode = new_mode
-            self.project_text_all = new_all
-            self.project_text_videos = new_video
-            self.project_text_photos = new_photo
-            if changed:
-                self.is_modified = True
-                self._schedule_preview(200)
-            return changed
-
-        ai_row = tk.Frame(body, bg=P["panel"])
-        ai_row.pack(fill="x", pady=(6, 0))
-        ai_status = tk.Label(ai_row, text="", bg=P["panel"], fg=P["muted"],
-                             font=("Segoe UI", 8))
-
-        def ai_target():
-            if mode_var.get() == "all":
-                return all_text
-            return photo_text if focus_state.get("target") == "photo" else video_text
-
-        def has_pending_caption_changes():
-            if mode_var.get() == "all":
-                return (all_text.get("1.0", "end-1c").strip() !=
-                        (getattr(self, "project_text_all", "") or "").strip())
-            return (
-                video_text.get("1.0", "end-1c").strip() !=
-                (getattr(self, "project_text_videos", "") or "").strip() or
-                photo_text.get("1.0", "end-1c").strip() !=
-                (getattr(self, "project_text_photos", "") or "").strip())
-
-        def schedule_caption_apply(*_event):
-            if not has_pending_caption_changes():
-                return
-            self._cancel_pending_caption_apply()
-            self._caption_apply_callback = apply_text
-            self._caption_apply_job = self.root.after(
-                2000, self._commit_pending_caption_apply)
-
-        def choose_caption_mode(value):
-            previous = getattr(self, "project_caption_mode", "all")
-            if value == "by_type" and previous == "all":
-                shared = all_text.get("1.0", "end-1c").strip()
-                if shared:
-                    if not video_text.get("1.0", "end-1c").strip():
-                        video_text.insert("1.0", shared)
-                    if not photo_text.get("1.0", "end-1c").strip():
-                        photo_text.insert("1.0", shared)
-            elif value == "all" and previous == "by_type":
-                if not all_text.get("1.0", "end-1c").strip():
-                    shared = (video_text.get("1.0", "end-1c").strip() or
-                              photo_text.get("1.0", "end-1c").strip())
-                    if shared:
-                        all_text.insert("1.0", shared)
-            set_mode(value)
-            if value != previous:
-                self.is_modified = True
-                self._schedule_preview(200)
-            apply_text()
-
-        def undo_caption(widget):
-            try:
-                widget.edit_undo()
-            except tk.TclError:
-                return
-            schedule_caption_apply()
-
-        def redo_caption(widget):
-            try:
-                widget.edit_redo()
-            except tk.TclError:
-                return
-            schedule_caption_apply()
-
-        def clipboard_action(widget, event_name):
-            widget.focus_set()
-            try:
-                widget.event_generate(event_name)
-            except tk.TclError:
-                return
-            if event_name in ("<<Cut>>", "<<Paste>>"):
-                schedule_caption_apply()
-
-        def select_all(widget):
-            widget.tag_add("sel", "1.0", "end-1c")
-            widget.mark_set("insert", "1.0")
-            widget.see("insert")
-
-        def make_caption_menu(widget):
-            menu = tk.Menu(widget, tearoff=0, bd=0, bg=P["panel"], fg=P["text"],
-                           activebackground=P["selected"], activeforeground=P["text"])
-            menu.add_command(label="Αντιγραφή",
-                             command=lambda: clipboard_action(widget, "<<Copy>>"))
-            menu.add_command(label="Αποκοπή",
-                             command=lambda: clipboard_action(widget, "<<Cut>>"))
-            menu.add_command(label="Επικόλληση",
-                             command=lambda: clipboard_action(widget, "<<Paste>>"))
-            menu.add_separator()
-            menu.add_command(label="Αναίρεση", command=lambda: undo_caption(widget))
-            menu.add_command(label="Επιλογή όλων", command=lambda: select_all(widget))
-            return menu
-
-        def bind_caption_text(widget):
-            menu = make_caption_menu(widget)
-            widget._caption_menu = menu
-            widget.bind("<KeyRelease>", schedule_caption_apply, add="+")
-            widget.bind("<Control-c>", lambda _e: (clipboard_action(widget, "<<Copy>>"), "break")[1], add="+")
-            widget.bind("<Control-C>", lambda _e: (clipboard_action(widget, "<<Copy>>"), "break")[1], add="+")
-            widget.bind("<Control-x>", lambda _e: (clipboard_action(widget, "<<Cut>>"), "break")[1], add="+")
-            widget.bind("<Control-X>", lambda _e: (clipboard_action(widget, "<<Cut>>"), "break")[1], add="+")
-            widget.bind("<Control-v>", lambda _e: (clipboard_action(widget, "<<Paste>>"), "break")[1], add="+")
-            widget.bind("<Control-V>", lambda _e: (clipboard_action(widget, "<<Paste>>"), "break")[1], add="+")
-            widget.bind("<Control-z>", lambda _e: (undo_caption(widget), "break")[1], add="+")
-            widget.bind("<Control-Z>", lambda _e: (undo_caption(widget), "break")[1], add="+")
-            widget.bind("<Control-y>", lambda _e: (redo_caption(widget), "break")[1], add="+")
-            widget.bind("<Control-Y>", lambda _e: (redo_caption(widget), "break")[1], add="+")
-            widget.bind("<Control-a>", lambda _e: (select_all(widget), "break")[1], add="+")
-            widget.bind("<Control-A>", lambda _e: (select_all(widget), "break")[1], add="+")
-
-            def show_menu(event):
-                widget.focus_set()
-                try:
-                    widget.mark_set("insert", widget.index(f"@{event.x},{event.y}"))
-                except tk.TclError:
-                    pass
-                try:
-                    menu.tk_popup(event.x_root, event.y_root)
-                finally:
-                    menu.grab_release()
-                return "break"
-
-            widget.bind("<Button-3>", show_menu, add="+")
-
-        for caption_widget in (all_text, video_text, photo_text):
-            bind_caption_text(caption_widget)
-
-        def apply_ai_result(widget, value):
-            self._cancel_pending_caption_apply()
-            try:
-                if not widget.winfo_exists():
-                    return
-                widget.delete("1.0", "end")
-                widget.insert("1.0", value)
-                apply_text()
-            except tk.TclError:
-                pass
-
-        def set_ai_busy(active):
-            try:
-                ai_button.config(state="disabled" if active else "normal",
-                                 text=("Γίνεται βελτίωση…" if active
-                                       else "Βελτίωση με AI"))
-                ai_status.config(text=("Το AI γράφει…" if active else ""),
-                                 fg=(P["accent"] if active else P["muted"]))
-            except tk.TclError:
-                pass
-
-        def improve_caption_text():
-            widget = ai_target()
-            self.improve_text_with_ai(
-                widget.get("1.0", "end-1c"),
-                getattr(self, "project_ai_instructions", ""),
-                apply_result=lambda value, w=widget: apply_ai_result(w, value),
-                set_busy=set_ai_busy)
-
-        ai_button = flat_button(ai_row, "Βελτίωση με AI", improve_caption_text,
-                                background=P["accent_faint"], foreground=P["accent"],
-                                active_background=P["selected"],
-                                font=("Segoe UI", 8, "bold"), padx=9, pady=4)
-        ai_button.pack(side="left")
-        ai_status.pack(side="left", padx=(8, 0))
-
-        undo_row = tk.Frame(body, bg=P["panel"])
-        undo_row.pack(fill="x", pady=(6, 0))
-        flat_button(undo_row, "Undo", lambda: undo_caption(ai_target()),
-                    background=P["raised"], foreground=P["muted"],
-                    active_background=P["selected"], font=("Segoe UI", 8),
-                    padx=8, pady=4).pack(side="left")
-        tk.Label(undo_row, text="Αυτόματη εφαρμογή μετά από 2 δευτ.",
-                 bg=P["panel"], fg=P["muted"], font=("Segoe UI", 7)).pack(
-            side="left", padx=(8, 0))
-
-        self._section(body, "TEMPLATE ΚΕΙΜΕΝΟΥ")
-        template_var = getattr(self, "_caption_template_var", None)
-        if template_var is None:
-            self._caption_template_var = template_var = tk.StringVar()
-        self._sync_caption_template_dropdown()
-        combo = ttk.Combobox(body, textvariable=template_var,
-                             values=list(TEMPLATES.values()), state="readonly")
-        combo.pack(fill="x")
-        combo.bind("<<ComboboxSelected>>", self._on_caption_template_selected, add="+")
-
-        def open_full_editor():
-            apply_text()
-            self._cancel_pending_caption_apply()
-            self.open_text_captions_manager(
-                initial_strategy=getattr(self, "project_caption_mode", "all"))
-
-        self._section(body, "ΠΕΡΙΣΣΟΤΕΡΑ")
-        primary_button(body, "Πλήρης επεξεργασία κειμένων",
-                       open_full_editor).pack(fill="x", pady=(2, 4))
-        primary_button(body, "Presentation / Slide Design",
-                       lambda: self.open_presentation_editor(self._selected_item_index())
-                       if self._selected_item_index() is not None else None).pack(fill="x", pady=2)
-
-        self._inspector_caption_refs = {
-            "mode_var": mode_var,
-            "set_mode": set_mode,
-            "all": all_text,
-            "video": video_text,
-            "photo": photo_text,
-        }
-
-    def _render_design_inspector(self, body):
-        self.inspector_title_var.set("Slide Design")
-        self._section(body, "PROJECT DEFAULT TEMPLATE")
-        template_var = tk.StringVar(value=TEMPLATES.get(
-            normalize_template(getattr(self, "project_template", "legacy")),
-            TEMPLATES["legacy"]))
-        combo = ttk.Combobox(body, textvariable=template_var,
-                             values=list(TEMPLATES.values()), state="readonly")
-        combo.pack(fill="x")
-
-        def apply_default(_event=None):
-            key = next((name for name, label in TEMPLATES.items()
-                        if label == template_var.get()), "legacy")
-            self.project_template = self._remember_caption_template(key)
-            self.is_modified = True
-            self.update_media_display()
-            self._schedule_preview(150)
-            self.render_storyboard()
-
-        combo.bind("<<ComboboxSelected>>", apply_default, add="+")
-
-        self._section(body, "TEMPLATES")
-        grid = tk.Frame(body, bg=P["panel"])
-        grid.pack(fill="x")
-        grid.columnconfigure(0, weight=1, uniform="template")
-        grid.columnconfigure(1, weight=1, uniform="template")
-        descriptions = {
-            "legacy": "Απλό · καθαρό κείμενο",
-            "navy_gold": "Navy & Gold editorial",
-            "cinematic": "Σινεματικός υπότιτλος",
-            "lower_third": "Διαφανές lower third",
-            "intro_outro": "Introduction / Outro",
-        }
-        index, item = self._selected_item()
-        for position, (key, label) in enumerate(TEMPLATES.items()):
-            card = tk.Frame(grid, bg=P["raised"], highlightthickness=1,
-                            highlightbackground=P["border"], padx=8, pady=7,
-                            cursor="hand2")
-            card.grid(row=position // 2, column=position % 2, sticky="nsew",
-                      padx=(0 if position % 2 == 0 else 4, 0), pady=4)
-            tk.Label(card, text="Aa", bg=P["raised"], fg=P["accent"],
-                     font=("Segoe UI", 14, "bold")).pack(anchor="w")
-            tk.Label(card, text=label, bg=P["raised"], fg=P["text"],
-                     font=("Segoe UI", 8, "bold"), wraplength=120,
-                     justify="left").pack(anchor="w")
-            tk.Label(card, text=descriptions.get(key, ""), bg=P["raised"],
-                     fg=P["muted"], font=("Segoe UI", 7), wraplength=120,
-                     justify="left").pack(anchor="w", pady=(2, 0))
-            if key == normalize_template(getattr(self, "project_template", "legacy")):
-                card.configure(highlightbackground=P["accent"], highlightthickness=2)
-            if index is not None:
-                card.bind("<Button-1>", lambda _e, k=key, i=index:
-                          self._apply_template_to_scene(i, k))
-                for child in card.winfo_children():
-                    child.bind("<Button-1>", lambda _e, k=key, i=index:
-                               self._apply_template_to_scene(i, k))
-
-        self._section(body, "ΕΦΑΡΜΟΓΗ")
-        tk.Label(body, text="Κλικ σε template για την επιλεγμένη σκηνή. "
-                           "Οι πλήρεις ρυθμίσεις ανοίγουν στον editor.",
-                 bg=P["panel"], fg=P["muted"], font=("Segoe UI", 8),
-                 wraplength=255, justify="left").pack(anchor="w", pady=(0, 6))
-        if index is None:
-            self._empty_inspector(body, "Διάλεξε ή πρόσθεσε μια σκηνή για να εφαρμόσεις template.")
-            return
-        primary_button(body, "Presentation / Slide Design",
-                       lambda: self.open_presentation_editor(index)).pack(fill="x", pady=2)
-        flat_button(body, "Εφαρμογή σε όλες τις σκηνές",
-                    lambda: self._apply_template_to_all(
-                        normalize_template(getattr(self, "project_template", "legacy"))),
-                    background=P["raised"], foreground=P["text"],
-                    active_background=P["selected"]).pack(fill="x", pady=2)
-        flat_button(body, "Slide Design / Project Templates",
-                    self.open_storyboard_editor, background=P["raised"],
-                    foreground=P["text"], active_background=P["selected"]).pack(
             fill="x", pady=2)
 
     def _after_scene_edit(self):
