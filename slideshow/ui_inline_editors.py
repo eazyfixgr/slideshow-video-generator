@@ -6,21 +6,15 @@ from tkinter import ttk, filedialog, colorchooser
 
 from .slide_design import (TEMPLATES, DESIGN_FIELDS, normalize_presentation,
                            INHERIT_TEMPLATE, INHERIT_TEMPLATE_LABEL)
+from .ui_caption_inspector import CaptionInspectorMixin
 from .design_templates import (read_design_templates, write_design_templates,
                                design_template_choices)
 
-CAPTION_FIELDS = {
-    "category": "Κατηγορία / τύπος", "location": "Τοποθεσία", "price": "Τιμή",
-    "details": "Λεπτομέρειες", "cta": "Call to action", "business_name": "Επωνυμία",
-    "phone": "Τηλέφωνο", "website": "Ιστότοπος",
-}
-MODES = {"Κοινό κείμενο": "global", "Δικό της κείμενο": "custom",
-         "Χωρίς κείμενο": "none", "Δικό της + κοινό": "combine"}
 STYLE_FIELDS = tuple(key for key in DESIGN_FIELDS
                      if key not in ("duration", "transition", "transition_duration"))
 
 
-class InlineEditorsMixin:
+class InlineEditorsMixin(CaptionInspectorMixin):
     """Persist pending input before the inspector changes its scene or context."""
 
     def _cancel_pending_caption_apply(self):
@@ -52,8 +46,15 @@ class InlineEditorsMixin:
         self.render_storyboard()
         self._refresh_header()
 
+    def _inline_label(self, parent, text=None, **kwargs):
+        label = ttk.Label(parent, text=text, wraplength=280)
+        label.pack(fill="x", **kwargs)
+        label.bind("<Configure>", lambda event: label.configure(
+            wraplength=max(100, event.width)), add="+")
+        return label
+
     def _inline_field(self, parent, label, value, changed, choices=None):
-        ttk.Label(parent, text=label, wraplength=195).pack(anchor="w", pady=(7, 2))
+        self._inline_label(parent, label, pady=(7, 2))
         var = tk.StringVar(value=value)
         if choices:
             widget = ttk.Combobox(parent, textvariable=var, values=list(choices),
@@ -65,7 +66,7 @@ class InlineEditorsMixin:
         return var, widget
 
     def _inline_text(self, parent, label, value, changed, height=3):
-        ttk.Label(parent, text=label, wraplength=195).pack(anchor="w", pady=(7, 2))
+        self._inline_label(parent, label, pady=(7, 2))
         widget = tk.Text(parent, height=height, width=18, wrap="word", undo=True)
         widget.pack(fill="x")
         widget.insert("1.0", value)
@@ -93,161 +94,6 @@ class InlineEditorsMixin:
             self._render_inspector()
         combo.bind("<<ComboboxSelected>>", select)
         return current
-
-    def _render_captions_inspector(self, body):
-        self.inspector_title_var.set("Captions")
-        scope = self._inline_scope(body,
-            ("Όλο το project", "Φωτογραφίες", "Βίντεο", "Τρέχουσα σκηνή", "Επιλεγμένες σκηνές"),
-            "_inline_caption_scope", "Όλο το project")
-        individual = scope in ("Τρέχουσα σκηνή", "Επιλεγμένες σκηνές")
-        index, item = self._selected_item()
-        if individual and item is None:
-            self._empty_inspector(body, "Πρόσθεσε media για να γράψεις κείμενο ανά σκηνή.")
-            return
-        media = self.media_files
-        targets = ([item] if scope == "Τρέχουσα σκηνή" else
-                   [media[i] for i in self._selected()] if individual else [])
-        if individual and not targets:
-            targets = [item]
-        presentation = normalize_presentation(item[2].get("presentation")) if item else {}
-        focused = {"widget": None}
-        fields = {}
-        widgets = {}
-        dirty = {"value": False, "text": False}
-        mode = None
-
-        def schedule_apply():
-            self._inline_changed(2000)
-
-        def changed():
-            dirty["value"] = True
-            if mode is not None and mode.get() in ("Κοινό κείμενο", "Χωρίς κείμενο"):
-                mode.set("Δικό της κείμενο")
-            schedule_apply()
-
-        def caption_changed():
-            dirty["text"] = True
-            changed()
-
-        if individual:
-            label = next(label for label, key in MODES.items() if key == presentation["mode"])
-            mode, _combo = self._inline_field(body, "Τρόπος κειμένου", label,
-                                              schedule_apply, MODES)
-            mode.trace_add("write", lambda *_: dirty.update(value=True))
-            # Keep old structured captions editable without rewriting projects on open.
-            text = "\n".join(presentation[key] for key in ("title", "subtitle", "description")
-                             if presentation[key])
-            widget = self._inline_text(body, "Κείμενο", text, caption_changed, 7)
-            fields["description"] = widget
-            widgets["description"] = widget
-            advanced = ttk.LabelFrame(body, text="Προαιρετικές πληροφορίες", padding=5)
-            toggle = tk.BooleanVar(value=False)
-            ttk.Checkbutton(body, text="Περισσότερα πεδία", variable=toggle,
-                            command=lambda: advanced.pack(fill="x") if toggle.get()
-                            else advanced.pack_forget()).pack(anchor="w", pady=6)
-            for key in CAPTION_FIELDS:
-                var, entry = self._inline_field(advanced, CAPTION_FIELDS[key], presentation[key], changed)
-                fields[key] = var
-                widgets[key] = entry
-        else:
-            attr = {"Όλο το project": "project_text_all", "Φωτογραφίες": "project_text_photos",
-                    "Βίντεο": "project_text_videos"}[scope]
-            widget = self._inline_text(body, "Κοινό κείμενο", getattr(self, attr, ""), changed, 7)
-            fields["shared"] = widget
-            widgets["shared"] = widget
-            ttk.Label(body, text="Οι σκηνές με ατομικό κείμενο κρατούν τη λεζάντα τους.",
-                      wraplength=195).pack(anchor="w", pady=6)
-        for widget in widgets.values():
-            widget.bind("<FocusIn>", lambda _e, w=widget: focused.update(widget=w), add="+")
-        focused["widget"] = next(iter(widgets.values()))
-        instructions = self._inline_text(body, "Οδηγίες AI για το project",
-                                         self.project_ai_instructions, schedule_apply, 2)
-
-        def values():
-            return {key: widget.get("1.0", "end-1c") if isinstance(widget, tk.Text)
-                    else widget.get() for key, widget in fields.items()}
-
-        def apply():
-            if self.media_files is not media or not body.winfo_exists():
-                return False
-            new_instructions = instructions.get("1.0", "end-1c")
-            updated = new_instructions != self.project_ai_instructions
-            self.project_ai_instructions = new_instructions
-            if dirty["value"]:
-                data = values()
-                if individual:
-                    if dirty["text"]:
-                        data.update(title="", subtitle="")
-                    else:
-                        data.pop("description")
-                    valid = [target for target in targets if any(target is entry for entry in media)]
-                    if valid:
-                        self.push_undo()
-                    for target in valid:
-                        current = normalize_presentation(target[2].get("presentation"))
-                        current.update(data, mode=MODES[mode.get()])
-                        target[2]["presentation"] = current
-                else:
-                    setattr(self, attr, data["shared"])
-                    self.project_caption_mode = "all" if scope == "Όλο το project" else "by_type"
-                    if self.project_caption_mode == "all":
-                        self.project_text_videos = self.project_text_all
-                        self.project_text_photos = self.project_text_all
-                dirty["value"] = False
-                dirty["text"] = False
-                updated = True
-            if updated:
-                self._inline_refresh()
-            return updated
-        self._caption_apply_callback = apply
-        if not individual:
-            def share_with_scenes():
-                self._commit_pending_caption_apply()
-                kinds = {"Φωτογραφίες": "image", "Βίντεο": "video"}
-                self.push_undo()
-                for kind, _path, edit in media:
-                    if scope == "Όλο το project" or kind == kinds[scope]:
-                        current = normalize_presentation(edit.get("presentation"))
-                        current["mode"] = "global"
-                        edit["presentation"] = current
-                self._inline_refresh()
-            ttk.Button(body, text="Χρήση κοινού κειμένου\nσε αυτές τις σκηνές",
-                       command=share_with_scenes).pack(fill="x", pady=3)
-        if scope == "Επιλεγμένες σκηνές":
-            def apply_to_group():
-                dirty["value"] = True
-                dirty["text"] = True
-                self._commit_pending_caption_apply()
-            ttk.Button(body, text="Αντιγραφή κειμένου\nστην επιλογή", command=apply_to_group).pack(fill="x", pady=3)
-
-        def widget_changed(widget):
-            if individual and widget is widgets["description"]:
-                caption_changed()
-            else:
-                changed()
-
-        def paste():
-            widget = focused["widget"]
-            self._do_text_shortcut(widget, "paste")
-            widget_changed(widget)
-        ttk.Button(body, text="Quick Paste", command=paste).pack(fill="x", pady=3)
-
-        def improve():
-            widget = focused["widget"]
-            text = widget.get("1.0", "end-1c") if isinstance(widget, tk.Text) else widget.get()
-            def receive(value):
-                if not body.winfo_exists() or self.media_files is not media:
-                    return
-                if isinstance(widget, tk.Text):
-                    widget.delete("1.0", "end")
-                    widget.insert("1.0", value)
-                else:
-                    widget.delete(0, "end")
-                    widget.insert(0, value)
-                widget_changed(widget)
-                self._commit_pending_caption_apply()
-            self.improve_text_with_ai(text, instructions.get("1.0", "end-1c"), receive)
-        ttk.Button(body, text="Βελτίωση με AI", command=improve).pack(fill="x", pady=3)
 
     def _render_design_inspector(self, body):
         self.inspector_title_var.set("Slide Design")
@@ -368,7 +214,8 @@ class InlineEditorsMixin:
             return True
         self._caption_apply_callback = apply
         ttk.Button(body, text="Εφαρμογή εμφάνισης", command=self._commit_pending_caption_apply).pack(fill="x", pady=8)
-        ttk.Label(body, textvariable=status, wraplength=195).pack(fill="x")
+        status_label = self._inline_label(body)
+        status_label.configure(textvariable=status)
         default_label = TEMPLATES.get(self.project_template, TEMPLATES["legacy"])
         default, combo = self._inline_field(body, "Προεπιλεγμένο template project", default_label,
                                             lambda: None, TEMPLATES.values())

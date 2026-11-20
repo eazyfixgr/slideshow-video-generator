@@ -23,9 +23,25 @@ class LibraryMixin:
     """The media library: adding/removing/reordering items and their badges."""
 
     # ----------------------------------------------------------- undo/redo
+    def _editor_snapshot(self):
+        return copy.deepcopy({"media": self.media_files,
+                              "caption_mode": self.project_caption_mode,
+                              "all": self.project_text_all,
+                              "photos": self.project_text_photos,
+                              "videos": self.project_text_videos,
+                              "instructions": self.project_ai_instructions})
+
+    def _restore_editor_snapshot(self, snapshot):
+        self.media_files = snapshot["media"]
+        self.project_caption_mode = snapshot["caption_mode"]
+        self.project_text_all = snapshot["all"]
+        self.project_text_photos = snapshot["photos"]
+        self.project_text_videos = snapshot["videos"]
+        self.project_ai_instructions = snapshot["instructions"]
+
     def push_undo(self):
-        """Snapshot the media list before a structural change."""
-        self._undo_stack.append(copy.deepcopy(self.media_files))
+        """Snapshot media and caption strategy before an edit."""
+        self._undo_stack.append(self._editor_snapshot())
         if len(self._undo_stack) > 30:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
@@ -34,8 +50,8 @@ class LibraryMixin:
         self._commit_pending_caption_apply()
         if not self._undo_stack:
             return
-        self._redo_stack.append(copy.deepcopy(self.media_files))
-        self.media_files = self._undo_stack.pop()
+        self._redo_stack.append(self._editor_snapshot())
+        self._restore_editor_snapshot(self._undo_stack.pop())
         self.selected_indices = set()
         self.is_modified = True
         self.update_media_display()
@@ -45,8 +61,8 @@ class LibraryMixin:
         self._commit_pending_caption_apply()
         if not self._redo_stack:
             return
-        self._undo_stack.append(copy.deepcopy(self.media_files))
-        self.media_files = self._redo_stack.pop()
+        self._undo_stack.append(self._editor_snapshot())
+        self._restore_editor_snapshot(self._redo_stack.pop())
         self.selected_indices = set()
         self.is_modified = True
         self.update_media_display()

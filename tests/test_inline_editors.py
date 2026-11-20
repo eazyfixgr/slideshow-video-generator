@@ -37,7 +37,7 @@ class InlineEditorTests(unittest.TestCase):
                 {"title": "Second", "mode": "custom", "duration": 7})}),
         ]
         self.app.selected_indices = {0}
-        self.app._inline_caption_scope = "Τρέχουσα σκηνή"
+        self.app.project_caption_mode = "individual"
         self.app._set_inspector_view("captions")
         self.root.update()
 
@@ -171,8 +171,11 @@ class InlineEditorTests(unittest.TestCase):
         labels = [widget.cget("text") for widget in self.widgets(tk.ttk.Label)]
         self.assertNotIn("Τίτλος", labels)
         self.assertNotIn("Υπότιτλος", labels)
+        self.assertNotIn("Τρόπος κειμένου", labels)
+        self.assertIn("Επιπλέον οδηγίες για AI", labels)
         buttons = [widget.cget("text") for widget in self.widgets(tk.ttk.Button)]
         self.assertNotIn("Εφαρμογή κειμένου", buttons)
+        self.assertNotIn("Quick Paste", buttons)
         self.caption_edit("First\nSubtitle\nUpdated body")
         self.app._commit_pending_caption_apply()
         data = self.app.media_files[0][2]["presentation"]
@@ -188,6 +191,140 @@ class InlineEditorTests(unittest.TestCase):
         data = self.app.media_files[0][2]["presentation"]
         self.assertEqual(data["description"], "Improved")
         self.assertEqual(data["title"], "")
+
+    def test_three_caption_strategies_and_mixed_group_round_trip(self):
+        self.app.media_files.append(("video", str(self.directory / "one.png"), {
+            "presentation": normalize_presentation({"mode": "global", "duration": 9})}))
+        self.app._set_caption_strategy("all")
+        self.assertEqual(len(self.widgets(tk.Text)), 2)
+        self.caption_edit("Shared caption")
+        self.app._commit_pending_caption_apply()
+        for kind, _path, edit in self.app.media_files:
+            effective = self.app._presentation_for(edit)
+            self.assertEqual(self.app._presentation_text(effective, kind), "Shared caption")
+        self.assertEqual(self.app.media_files[0][2]["presentation"]["title"], "First")
+        self.app._set_caption_strategy("by_type")
+        self.assertEqual(len(self.widgets(tk.Text)), 3)
+        for widget, text in zip(self.widgets(tk.Text)[:2], ("Photo caption", "Video caption")):
+            widget.insert("1.0", text)
+        self.root.update()
+        self.app._commit_pending_caption_apply()
+        self.assertEqual(self.app.get_text_for("image"), "Photo caption")
+        self.assertEqual(self.app.get_text_for("video"), "Video caption")
+        self.app.name_var.set("Strategies")
+        with patch("slideshow.app.messagebox.showinfo"):
+            self.app.save_project()
+        project = next(self.app.projects_dir.glob("*.json"))
+        self.app.load_project_file(project)
+        self.assertEqual(self.app.project_caption_mode, "by_type")
+        self.app._set_caption_strategy("all")
+        self.caption_edit("")
+        self.app._commit_pending_caption_apply()
+        with patch("slideshow.app.messagebox.showinfo"):
+            self.app.save_project()
+        self.app.load_project_file(project)
+        self.assertEqual(self.app.get_text_for("image"), "")
+        self.app._set_caption_strategy("by_type")
+        self.assertEqual(self.app.get_text_for("image"), "Photo caption")
+        self.assertEqual(self.app.get_text_for("video"), "Video caption")
+        self.app._set_caption_strategy("individual")
+        self.assertEqual(self.app.media_files[2][2]["presentation"]["description"], "Video caption")
+        self.app.selected_indices = {0, 2}
+        self.app._render_inspector()
+        before = copy.deepcopy(self.app.media_files)
+        self.caption_edit("Mixed group")
+        self.app._commit_pending_caption_apply()
+        for index in (0, 2):
+            value = self.app.media_files[index][2]["presentation"]
+            self.assertEqual(value["description"], "Mixed group")
+            for key in ("scene_id", "duration", "template"):
+                self.assertEqual(value[key], before[index][2]["presentation"][key])
+        self.assertEqual(self.app.media_files[1], before[1])
+        with patch("slideshow.app.messagebox.showinfo"):
+            self.app.save_project()
+        self.app.load_project_file(project)
+        self.assertEqual(self.app.project_caption_mode, "individual")
+        self.assertEqual(self.app.media_files[2][2]["presentation"]["description"], "Mixed group")
+        self.assertEqual(self.app._new_item("image", str(self.directory / "one.png"))
+                         [2]["presentation"]["mode"], "custom")
+
+    def test_legacy_mixed_caption_migration_and_strategy_undo(self):
+        video, photo, mode, shared = self.app._project_caption_values({
+            "caption_mode": "all", "project_text_all": "Shared",
+            "media_files": self.app.media_files})
+        self.assertEqual((video, photo, mode, shared), ("Shared", "Shared", "individual", "Shared"))
+        self.app._set_caption_strategy("all")
+        self.app.undo()
+        self.assertEqual(self.app.project_caption_mode, "individual")
+        self.app.redo()
+        self.assertEqual(self.app.project_caption_mode, "all")
+
+    def test_keyboard_and_context_menu_paste_apply_without_quick_paste(self):
+        widget = self.widgets(tk.Text)[0]
+        widget.delete("1.0", "end")
+        self.root.clipboard_clear()
+        self.root.clipboard_append("Pasted caption")
+        widget.event_generate("<<Paste>>")
+        self.root.update()
+        self.app._commit_pending_caption_apply()
+        self.assertEqual(self.app.media_files[0][2]["presentation"]["description"], "Pasted caption")
+        widget.delete("1.0", "end")
+        menu = next(child for child in widget.winfo_children() if isinstance(child, tk.Menu))
+        menu.invoke("Paste")
+        self.root.update()
+        self.app._commit_pending_caption_apply()
+        self.assertEqual(self.app.media_files[0][2]["presentation"]["description"], "Pasted caption")
+
+    def drag_sash(self, index, offset):
+        workspace = self.app.workspace
+        x, _y = workspace.sash_coord(index)
+        for event, position in (("<ButtonPress-1>", x + 4),
+                                ("<B1-Motion>", x + 4 + offset),
+                                ("<ButtonRelease-1>", x + 4 + offset)):
+            workspace.event_generate(event, x=position, y=100)
+            self.root.update()
+        self.root.update()
+
+    def pane_widths(self):
+        return [self.app.workspace.nametowidget(name).winfo_width()
+                for name in self.app.workspace.panes()]
+
+    def test_both_dividers_drag_and_restore_independently_for_each_profile(self):
+        self.root.geometry("1250x850")
+        self.root.deiconify()
+        self.root.update()
+        first_profile = self.app.active_profile_id
+        initial = self.pane_widths()
+        self.assertAlmostEqual(initial[2], 360, delta=3)
+        self.drag_sash(0, 80)
+        self.assertGreater(self.pane_widths()[0], initial[0] + 50)
+        self.drag_sash(1, -80)
+        first_widths = self.pane_widths()
+        self.assertGreater(first_widths[2], initial[2] + 50,
+                           (initial, first_widths, self.app.workspace.winfo_width()))
+        first_settings = self.app.settings_file
+        saved = json.loads(first_settings.read_text())["workspace_layout"]
+        self.assertAlmostEqual(sum(saved), 1)
+        self.assertNotIn("workspace_layout", self.app._capture_project_settings())
+        second = self.app.create_new_profile("Layout two")
+        self.root.update()
+        self.drag_sash(0, 20)
+        self.drag_sash(1, 40)
+        second_widths = self.pane_widths()
+        self.app.switch_profile(first_profile)
+        self.root.update()
+        for expected, actual in zip(first_widths, self.pane_widths()):
+            self.assertAlmostEqual(expected, actual, delta=3)
+        self.root.geometry("1000x850")
+        self.root.update()
+        self.root.geometry("1250x850")
+        self.root.update()
+        for expected, actual in zip(first_widths, self.pane_widths()):
+            self.assertAlmostEqual(expected, actual, delta=3)
+        self.app.switch_profile(second["id"])
+        self.root.update()
+        for expected, actual in zip(second_widths, self.pane_widths()):
+            self.assertAlmostEqual(expected, actual, delta=3)
 
 
 if __name__ == "__main__":

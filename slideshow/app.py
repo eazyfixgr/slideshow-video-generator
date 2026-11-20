@@ -41,7 +41,7 @@ from .ui_text import TextInputMixin
 from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
 from .ui_presentation import PresentationMixin
 from .ui_captions import CaptionsMixin
-from .slide_design import normalize_template
+from .slide_design import normalize_template, normalize_presentation
 from .ui_welcome import WelcomeMixin
 from .ui_theme import ThemeMixin
 from .profiles import (active_profile as registry_active_profile, create_profile,
@@ -307,6 +307,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         profile = get_profile(self.profiles_data, profile_id)
         if profile is None:
             return False
+        self._remember_workspace_layout()
         try:
             self.save_settings()
             self.save_music_tracker()
@@ -321,6 +322,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.project_settings = {}
         self._apply_profile_paths()
         self.load_settings()
+        self._load_profile_workspace_layout()
         self._global_settings = copy.deepcopy(self.settings)
         self.project_template = normalize_template(
             self.settings.get("last_caption_template", "legacy"))
@@ -339,6 +341,11 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         if hasattr(self, "name_var"):
             self.name_var.set("")
             self.out_var.set(self.settings.get("output_folder", ""))
+        self.project_caption_mode = "all"
+        self.project_text_all = ""
+        self.project_text_photos = ""
+        self.project_text_videos = ""
+        self.project_ai_instructions = ""
         self._sync_caption_template_dropdown()
         if hasattr(self, "thumb_frame"):
             self.update_media_display()
@@ -390,6 +397,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
                 return False
             if not answer:
                 self.is_modified = False
+        self._remember_workspace_layout()
         self._save_window_state()
         try:
             self.save_settings()
@@ -596,21 +604,29 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
     @staticmethod
     def _project_caption_values(data):
-        """Migrate old shared photo/video text and normalize the new strategy."""
+        """Preserve older mixed captions while migrating to three explicit strategies."""
         old_text = data.get("text", "")
         video_text = data.get("text_videos", old_text) or ""
         photo_text = data.get("text_photos", "") or ""
-        caption_mode = data.get("caption_mode")
-        if caption_mode in ("all", "by_type"):
-            project_text_all = str(data.get("project_text_all") or "")
-            if caption_mode == "all" and not project_text_all:
-                project_text_all = video_text or photo_text
-            return video_text, photo_text, caption_mode, project_text_all
-
-        video_value, photo_value = video_text.strip(), photo_text.strip()
-        if video_value and photo_value and video_value != photo_value:
-            return video_text, photo_text, "by_type", ""
-        return video_text, photo_text, "all", video_text or photo_text
+        mode = data.get("caption_mode")
+        shared = str(data.get("project_text_all") or "")
+        if mode not in ("all", "by_type", "individual"):
+            mode = ("by_type" if video_text.strip() and photo_text.strip()
+                    and video_text.strip() != photo_text.strip() else "all")
+        if mode == "all" and not shared and not data.get("caption_strategy_version"):
+            shared = video_text or photo_text
+        if not data.get("caption_strategy_version"):
+            media = data.get("media_files", data.get("media", []))
+            individual = any(
+                isinstance(item, (list, tuple)) and len(item) > 2 and
+                isinstance(item[2], dict) and
+                normalize_presentation(item[2].get("presentation"))["mode"] != "global"
+                for item in media or [])
+            if individual:
+                if mode == "all":
+                    video_text = photo_text = shared
+                mode = "individual"
+        return video_text, photo_text, mode, shared
 
 
     def load_music_tracker(self):
@@ -758,16 +774,15 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
             "media_files": self.media_files,
             "text": (self.project_text_all if self.project_caption_mode == "all"
                      else self.project_text_videos),
-            "text_videos": (self.project_text_all if self.project_caption_mode == "all"
-                            else self.project_text_videos),
-            "text_photos": (self.project_text_all if self.project_caption_mode == "all"
-                            else self.project_text_photos),
+            "text_videos": self.project_text_videos,
+            "text_photos": self.project_text_photos,
             "ai_instructions": self.project_ai_instructions,
             "out": self.out_var.get(),
             "project_watermark": self.project_watermark,
             "project_template": self.project_template,
             "project_settings": self._capture_project_settings(),
             "caption_mode": self.project_caption_mode,
+            "caption_strategy_version": 1,
             "project_text_all": self.project_text_all,
         }
         p = self.projects_dir / f"{safe}.json"
@@ -1030,6 +1045,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         commit_captions = getattr(self, "_commit_pending_caption_apply", None)
         if commit_captions:
             commit_captions()
+        self._remember_workspace_layout()
         self._save_window_state()
         try:
             self.save_settings()
