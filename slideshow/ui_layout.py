@@ -175,7 +175,7 @@ class LayoutMixin:
                              highlightthickness=1)
         workspace.add(left, minsize=190, width=250, stretch="never")
         workspace.add(stage, minsize=420, stretch="always")
-        workspace.add(inspector, minsize=270, width=330, stretch="never")
+        workspace.add(inspector, minsize=203, width=248, stretch="never")
         self._build_library_panel(left)
         self._build_stage_panel(stage)
         self._build_inspector(inspector)

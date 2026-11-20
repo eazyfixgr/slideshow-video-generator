@@ -27,10 +27,13 @@ class InlineEditorTests(unittest.TestCase):
         self.app = SlideshowApp(self.root, show_welcome=False)
         self.app._schedule_preview = lambda *args: None
         self.app.render_storyboard = lambda: None
+        from PIL import Image
+        for name in ("one.png", "two.png"):
+            Image.new("RGB", (32, 32), "#304050").save(self.directory / name)
         self.app.media_files = [
-            ("image", "one.png", {"presentation": normalize_presentation(
+            ("image", str(self.directory / "one.png"), {"presentation": normalize_presentation(
                 {"title": "First", "mode": "custom", "duration": 4})}),
-            ("image", "two.png", {"presentation": normalize_presentation(
+            ("image", str(self.directory / "two.png"), {"presentation": normalize_presentation(
                 {"title": "Second", "mode": "custom", "duration": 7})}),
         ]
         self.app.selected_indices = {0}
@@ -55,16 +58,17 @@ class InlineEditorTests(unittest.TestCase):
         return [widget for widget in walk(self.app.inspector_content)
                 if isinstance(widget, kind)]
 
-    def title_edit(self, text):
+    def caption_edit(self, text):
         widget = self.widgets(tk.Text)[0]
         widget.delete("1.0", "end")
         widget.insert("1.0", text)
         self.root.update()
 
-    def test_scene_change_flushes_pending_title_without_a_dialog(self):
-        self.title_edit("Edited")
+    def test_scene_change_flushes_pending_caption_without_a_dialog(self):
+        self.caption_edit("Edited")
         self.app.select_scene(1)
-        self.assertEqual(self.app.media_files[0][2]["presentation"]["title"], "Edited")
+        self.assertEqual(self.app.media_files[0][2]["presentation"]["description"], "Edited")
+        self.assertEqual(self.app.media_files[0][2]["presentation"]["title"], "")
         self.assertEqual(self.app.media_files[1][2]["presentation"]["title"], "Second")
         self.assertEqual(self.widgets(tk.Text)[0].get("1.0", "end-1c"), "Second")
         self.app.open_presentation_editor(1)
@@ -123,20 +127,67 @@ class InlineEditorTests(unittest.TestCase):
         self.assertGreater(float(result), 0.3)
 
     def test_uncommitted_input_cannot_write_into_loaded_media(self):
-        self.title_edit("Old draft")
+        self.caption_edit("Old draft")
         replacement = copy.deepcopy(self.app.media_files)
         self.app.media_files = replacement
         self.app._render_inspector()
         self.assertEqual(replacement[0][2]["presentation"]["title"], "First")
 
     def test_save_commits_latest_keystroke_and_round_trips(self):
-        self.title_edit("Saved immediately")
+        self.caption_edit("Saved immediately")
         self.app.name_var.set("Inline test")
         with patch("slideshow.app.messagebox.showinfo"):
             self.assertTrue(self.app.save_project())
         path = next(self.app.projects_dir.glob("*.json"))
         self.assertTrue(self.app.load_project_file(path))
-        self.assertEqual(self.app.media_files[0][2]["presentation"]["title"], "Saved immediately")
+        self.assertEqual(self.app.media_files[0][2]["presentation"]["description"], "Saved immediately")
+
+    def wait_ms(self, milliseconds):
+        done = tk.BooleanVar(master=self.root, value=False)
+        self.root.after(milliseconds, lambda: done.set(True))
+        self.root.wait_variable(done)
+
+    def test_caption_waits_for_two_seconds_after_last_edit(self):
+        self.caption_edit("Still typing")
+        self.wait_ms(1100)
+        self.assertEqual(self.app.media_files[0][2]["presentation"]["title"], "First")
+        self.caption_edit("Finished")
+        self.wait_ms(1100)
+        self.assertEqual(self.app.media_files[0][2]["presentation"]["title"], "First")
+        self.wait_ms(1050)
+        self.assertEqual(self.app.media_files[0][2]["presentation"]["description"], "Finished")
+        self.assertIsNone(self.app._caption_apply_job)
+
+    def test_legacy_caption_is_editable_in_one_field_without_losing_text(self):
+        data = self.app.media_files[0][2]["presentation"]
+        data.update(subtitle="Subtitle", description="Body")
+        original = copy.deepcopy(data)
+        self.app._render_inspector()
+        self.root.update()
+        self.assertEqual(self.widgets(tk.Text)[0].get("1.0", "end-1c"),
+                         "First\nSubtitle\nBody")
+        self.app._commit_pending_caption_apply()
+        self.assertEqual(data, original)
+        labels = [widget.cget("text") for widget in self.widgets(tk.ttk.Label)]
+        self.assertNotIn("Τίτλος", labels)
+        self.assertNotIn("Υπότιτλος", labels)
+        buttons = [widget.cget("text") for widget in self.widgets(tk.ttk.Button)]
+        self.assertNotIn("Εφαρμογή κειμένου", buttons)
+        self.caption_edit("First\nSubtitle\nUpdated body")
+        self.app._commit_pending_caption_apply()
+        data = self.app.media_files[0][2]["presentation"]
+        self.assertEqual(data["description"], "First\nSubtitle\nUpdated body")
+        self.assertEqual((data["title"], data["subtitle"]), ("", ""))
+
+    def test_ai_result_updates_the_single_caption_field(self):
+        with patch.object(self.app, "improve_text_with_ai",
+                          side_effect=lambda text, instructions, receive: receive("Improved")):
+            button = next(widget for widget in self.widgets(tk.ttk.Button)
+                          if widget.cget("text") == "Βελτίωση με AI")
+            button.invoke()
+        data = self.app.media_files[0][2]["presentation"]
+        self.assertEqual(data["description"], "Improved")
+        self.assertEqual(data["title"], "")
 
 
 if __name__ == "__main__":
