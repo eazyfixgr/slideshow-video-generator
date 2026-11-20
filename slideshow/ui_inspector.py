@@ -312,6 +312,11 @@ class InspectorMixin:
                  bg=P["panel"], fg=P["muted"], font=("Segoe UI", 8)).pack(
             anchor="w", pady=(3, 0))
 
+        focus_state = {"target": "all"}
+        all_text.bind("<FocusIn>", lambda _e: focus_state.update(target="all"), add="+")
+        video_text.bind("<FocusIn>", lambda _e: focus_state.update(target="video"), add="+")
+        photo_text.bind("<FocusIn>", lambda _e: focus_state.update(target="photo"), add="+")
+
         def set_mode(value):
             self.project_caption_mode = value
             if value == "all":
@@ -334,6 +339,52 @@ class InspectorMixin:
                 self.project_text_photos = photo_text.get("1.0", "end-1c").strip()
             self.is_modified = True
             self._schedule_preview(200)
+
+        ai_row = tk.Frame(body, bg=P["panel"])
+        ai_row.pack(fill="x", pady=(6, 0))
+        ai_status = tk.Label(ai_row, text="", bg=P["panel"], fg=P["muted"],
+                             font=("Segoe UI", 8))
+
+        def ai_target():
+            if mode_var.get() == "all":
+                return all_text
+            return photo_text if focus_state.get("target") == "photo" else video_text
+
+        def apply_ai_result(widget, value):
+            try:
+                if not widget.winfo_exists():
+                    return
+                widget.delete("1.0", "end")
+                widget.insert("1.0", value)
+                widget.edit_reset()
+                apply_text()
+            except tk.TclError:
+                pass
+
+        def set_ai_busy(active):
+            try:
+                ai_button.config(state="disabled" if active else "normal",
+                                 text=("Γίνεται βελτίωση…" if active
+                                       else "Βελτίωση με AI"))
+                ai_status.config(text=("Το AI γράφει…" if active else ""),
+                                 fg=(P["accent"] if active else P["muted"]))
+            except tk.TclError:
+                pass
+
+        def improve_caption_text():
+            widget = ai_target()
+            self.improve_text_with_ai(
+                widget.get("1.0", "end-1c"),
+                getattr(self, "project_ai_instructions", ""),
+                apply_result=lambda value, w=widget: apply_ai_result(w, value),
+                set_busy=set_ai_busy)
+
+        ai_button = flat_button(ai_row, "Βελτίωση με AI", improve_caption_text,
+                                background=P["accent_faint"], foreground=P["accent"],
+                                active_background=P["selected"],
+                                font=("Segoe UI", 8, "bold"), padx=9, pady=4)
+        ai_button.pack(side="left")
+        ai_status.pack(side="left", padx=(8, 0))
 
         clear_buttons = tk.Frame(body, bg=P["panel"])
         clear_buttons.pack(fill="x", pady=(6, 0))
