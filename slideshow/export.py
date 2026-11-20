@@ -469,7 +469,7 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
             self._post_ui(self._finish_export_eta, completed, cancelled)
             finished = getattr(self, "_export_finished", None)
             if finished is not None:
-                self._post_ui(finished)
+                self._post_ui(finished, completed, cancelled)
 
 
     def _log_export(self, msg):

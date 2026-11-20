@@ -233,7 +233,7 @@ class ExportPanelMixin:
 
         self.root.after(800, check_started)
 
-    def _export_finished(self):
+    def _export_finished(self, completed=False, cancelled=False):
         self._export_running = False
         button = getattr(self, "_export_start_btn", None)
         if button is not None:
@@ -241,3 +241,10 @@ class ExportPanelMixin:
                 button.configure(state="normal")
             except tk.TclError:
                 pass
+        if completed and not cancelled:
+            window = getattr(self, "export_window", None)
+            if window is not None:
+                try:
+                    window.withdraw()
+                except tk.TclError:
+                    pass
