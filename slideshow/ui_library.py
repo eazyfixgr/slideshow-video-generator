@@ -5,7 +5,9 @@ video duration + file name tooltips, and Undo/Redo for structural changes.
 """
 
 import copy
+import os
 import re
+import threading
 from pathlib import Path
 
 import tkinter as tk
@@ -14,6 +16,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 from .deps import Image, ImageTk
 from .slide_design import has_presentation_settings
 from .ui_theme import MODERN_PALETTE as P
+from .ui_widgets import fit_cover
 
 
 class LibraryMixin:
@@ -231,11 +234,70 @@ class LibraryMixin:
             self._bind_item(lbl, i)
             self._add_tooltip(lbl, p)
 
+    def _library_thumb_key(self, kind, path, edit):
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            mtime = 0
+        return (str(path), mtime, kind, repr(edit.get("crop")),
+                str(edit.get("rotate", 0)), str(edit.get("brightness", 1)),
+                str(edit.get("color", 1)), str(edit.get("exif_orientation", 0)),
+                repr(edit.get("presentation")), repr(edit.get("erase")))
+
+    def _library_duration_text(self, kind, path):
+        if kind != "video":
+            return ""
+        duration = self._video_dur_cache.get(str(path))
+        return self._tl_mmss(duration) if duration and duration > 0 else ""
+
+    def _apply_library_thumb(self, token, outer, image, duration_text=""):
+        if token != getattr(self, "_lib_thumb_token", 0):
+            return
+        try:
+            if not outer.winfo_exists():
+                return
+            photo = ImageTk.PhotoImage(image)
+            self.thumbnails.append(photo)
+            outer._photo = photo
+            label = getattr(outer, "_thumb_label", None)
+            if label is not None:
+                label.configure(image=photo, text="", width=0, height=0)
+            duration_label = getattr(outer, "_duration_label", None)
+            if duration_label is not None and duration_text:
+                duration_label.configure(text=duration_text)
+        except tk.TclError:
+            pass
+
+    def _library_thumb_worker(self, pending, token):
+        for _index, kind, path, edit, outer, key, item_token in pending:
+            if token != getattr(self, "_lib_thumb_token", 0):
+                break
+            try:
+                if kind == "video":
+                    image = self._video_first_frame(path)
+                    duration = self._video_duration(path)
+                    self._video_dur_cache[str(path)] = duration
+                else:
+                    image = self.open_thumbnail_image(path, 512, apply_exif=False)
+                thumb_edit = {k: v for k, v in edit.items() if k != "erase"}
+                image = self._apply_image_edit(image.copy(), thumb_edit, path, m_type=kind)
+                image = fit_cover(image, 96, 68)
+            except Exception:
+                continue
+            self._lib_thumb_cache[key] = image
+            self._post_ui(self._apply_library_thumb, token, outer, image,
+                          self._library_duration_text(kind, path))
+
     def _build_icons(self, visible):
         width = self.media_canvas.winfo_width()
         if width < 50:
             width = 230
         cols = max(1, min(3, (width - 8) // 104))
+        if not hasattr(self, "_lib_thumb_cache"):
+            self._lib_thumb_cache = {}
+        self._lib_thumb_token = getattr(self, "_lib_thumb_token", 0) + 1
+        token = self._lib_thumb_token
+        pending = []
         for position, (i, (t, p, ed)) in enumerate(visible):
             outer = tk.Frame(self.thumb_frame, bg=P["raised"], bd=0,
                              highlightthickness=1, highlightbackground=P["border"])
@@ -243,42 +305,48 @@ class LibraryMixin:
             outer.grid(row=r, column=c, padx=3, pady=3, sticky='n')
             self.thumb_frame.columnconfigure(c, weight=1)
             self._item_widgets.append(outer)
-            try:
-                if t == "image":
-                    img = Image.open(p)
-                else:
-                    img = self._video_first_frame(p)
-                thumb_edit = {k: v for k, v in ed.items() if k != "erase"}
-                img = self._apply_image_edit(img.copy(), thumb_edit, p, m_type=t)
-                img.thumbnail((96, 72))
-                tk_img = ImageTk.PhotoImage(img)
-                self.thumbnails.append(tk_img)
-                lbl = tk.Label(outer, image=tk_img, bg=P["stage"])
-                lbl.pack(padx=1, pady=1)
-                tk.Label(outer, text=str(i + 1), font=("Segoe UI", 8, "bold"),
-                         fg=P["accent_text"], bg=P["accent"], padx=4).place(x=3, y=3)
-                if t == "video":
-                    tk.Label(outer, text="▶", font=("Segoe UI", 8, "bold"),
-                             fg=P["danger"], bg=P["stage"], padx=3).place(
-                        relx=1.0, x=-3, y=3, anchor='ne')
-                    dur = self._media_duration(t, p)
-                    if dur:
-                        tk.Label(outer, text=dur.strip(" ·"), font=("Segoe UI", 7),
-                                 fg=P["text"], bg=P["stage"], padx=3).place(
-                            relx=0.0, rely=1.0, x=3, y=-3, anchor='sw')
-                if self.has_edit(ed):
-                    tk.Label(outer, text="✎", font=("Segoe UI", 8, "bold"),
-                             fg=P["text"], bg=P["selected"], padx=3).place(
-                        relx=1.0, x=-3, rely=1.0, y=-3, anchor='se')
-                if has_presentation_settings(
-                        ed.get("presentation"), getattr(self, "project_template", "legacy")):
-                    tk.Label(outer, text="✦", font=("Segoe UI", 8, "bold"),
-                             fg=P["good"], bg=P["stage"], padx=3).place(
-                        relx=1.0, x=-3, rely=1.0, y=-19, anchor='se')
-            except Exception:
-                tk.Label(outer, text="Error", bg=P["raised"], fg=P["muted"]).pack()
+
+            holder = tk.Frame(outer, bg=P["stage"], width=96, height=68)
+            holder.pack(padx=1, pady=1)
+            holder.pack_propagate(False)
+            thumb = tk.Label(holder, bg=P["stage"],
+                             text=("▶" if t == "video" else "▦"),
+                             fg=P["muted"], font=("Segoe UI", 14))
+            thumb.pack(fill="both", expand=True)
+            outer._thumb_label = thumb
+
+            tk.Label(outer, text=str(i + 1), font=("Segoe UI", 8, "bold"),
+                     fg=P["accent_text"], bg=P["accent"], padx=4).place(x=3, y=3)
+            if t == "video":
+                tk.Label(outer, text="▶", font=("Segoe UI", 8, "bold"),
+                         fg=P["danger"], bg=P["stage"], padx=3).place(
+                    relx=1.0, x=-3, y=3, anchor='ne')
+                duration_label = tk.Label(outer, text="", font=("Segoe UI", 7),
+                                          fg=P["text"], bg=P["stage"], padx=3)
+                duration_label.place(relx=0.0, rely=1.0, x=3, y=-3, anchor='sw')
+                outer._duration_label = duration_label
+            if self.has_edit(ed):
+                tk.Label(outer, text="✎", font=("Segoe UI", 8, "bold"),
+                         fg=P["text"], bg=P["selected"], padx=3).place(
+                    relx=1.0, x=-3, rely=1.0, y=-3, anchor='se')
+            if has_presentation_settings(
+                    ed.get("presentation"), getattr(self, "project_template", "legacy")):
+                tk.Label(outer, text="✦", font=("Segoe UI", 8, "bold"),
+                         fg=P["good"], bg=P["stage"], padx=3).place(
+                    relx=1.0, x=-3, rely=1.0, y=-19, anchor='se')
             self._bind_tree(outer, i)
             self._add_tooltip(outer, p)
+
+            key = self._library_thumb_key(t, p, ed)
+            cached = self._lib_thumb_cache.get(key)
+            if cached is not None:
+                self._apply_library_thumb(token, outer, cached,
+                                          self._library_duration_text(t, p))
+            else:
+                pending.append((i, t, p, ed, outer, key, token))
+        if pending:
+            threading.Thread(target=self._library_thumb_worker,
+                             args=(pending, token), daemon=True).start()
 
     # -------------------------------------------------------- item events
     def _bind_tree(self, widget, idx):

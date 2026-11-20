@@ -341,6 +341,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self._sync_caption_template_dropdown()
         if hasattr(self, "thumb_frame"):
             self.update_media_display()
+        self._refresh_inspector_after_media(force=True)
         self._refresh_header()
         return True
 
@@ -699,8 +700,26 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.selected_indices = set()
         self.is_modified = False
         self.update_media_display()
+        self._refresh_inspector_after_media(force=True)
         self._refresh_header()
 
+
+    def _migrate_image_exif(self):
+        """Remember EXIF orientation for projects saved before auto-rotation."""
+        for kind, path, edit in getattr(self, "media_files", []):
+            if kind != "image" or not isinstance(edit, dict):
+                continue
+            if edit.get("exif_orientation"):
+                continue
+            try:
+                rotate = int(edit.get("rotate", 0) or 0) % 360
+            except (TypeError, ValueError):
+                rotate = 0
+            if rotate:
+                continue
+            orientation = self.read_exif_orientation(path)
+            if orientation != 1:
+                edit["exif_orientation"] = orientation
 
     def save_project(self):
         """Save the project. Returns True when it was saved, False otherwise.
@@ -961,6 +980,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.name_var.set(data.get("name", ""))
         self.media_files = self.normalize_media_list(
             data.get("media_files", data.get("media", [])))
+        self._migrate_image_exif()
         if not had_project_template:
             # Previous releases wrote "legacy" for the default appearance.
             for item in self.media_files:
@@ -985,11 +1005,13 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.set_last_project(path)
         self._refresh_header()
         if missing_media:
+            self._refresh_inspector_after_media(force=True)
             if on_loaded:
                 on_loaded()
             self._show_missing_media_recovery(missing_media)
             return True
         self.update_media_display()
+        self._refresh_inspector_after_media(force=True)
         if on_loaded:
             on_loaded()
         return True

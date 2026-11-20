@@ -3,7 +3,7 @@
 import sys
 
 try:
-    from PIL import Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhance
+    from PIL import Image, ImageTk, ImageOps, ImageFilter, ImageDraw, ImageFont, ImageEnhance
     if not hasattr(Image, 'ANTIALIAS'):
         Image.ANTIALIAS = Image.Resampling.LANCZOS
 

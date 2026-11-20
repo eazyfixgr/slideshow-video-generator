@@ -101,7 +101,8 @@ class StoryboardMixin:
         except OSError:
             mtime = 0
         return (path, mtime, str(item[2].get("presentation")), str(item[2].get("crop")),
-                str(item[2].get("brightness")), str(item[2].get("color")))
+                str(item[2].get("brightness")), str(item[2].get("color")),
+                str(item[2].get("rotate", 0)), str(item[2].get("exif_orientation", 0)))
 
     def _make_storyboard_thumb(self, item):
         key = self._storyboard_thumb_key(item)
@@ -112,8 +113,7 @@ class StoryboardMixin:
         if kind == "video":
             image = self._video_first_frame(path)
         else:
-            image = Image.open(path)
-            image.load()
+            image = self.open_thumbnail_image(path, 400, apply_exif=False)
         thumb_edit = {key: value for key, value in edit.items() if key != "erase"}
         image = self._apply_image_edit(image.copy(), thumb_edit, path, m_type=kind)
         image = fit_cover(image, 124, 58)
@@ -138,12 +138,20 @@ class StoryboardMixin:
             return
 
         start = 0.0
+        pending = []
         for index, item in enumerate(self.media_files):
             seconds = self._scene_seconds(item)
             card = self._make_storyboard_card(index, item, start, seconds)
             start += seconds
             self._sb_widgets.append(card)
-            self._queue_storyboard_thumb(token, index, item, card)
+            key = self._storyboard_thumb_key(item)
+            cached = self._sb_thumb_cache.get(key)
+            if cached is not None:
+                self._apply_storyboard_thumb(card, index, cached)
+            else:
+                pending.append((index, item, card))
+        if pending:
+            self._queue_storyboard_thumbs(pending, token)
 
     def _make_storyboard_card(self, index, item, start, seconds):
         selected = index in getattr(self, "selected_indices", set())
@@ -185,33 +193,29 @@ class StoryboardMixin:
         card._thumb_label = thumb
         return card
 
-    def _queue_storyboard_thumb(self, token, index, item, card):
-        key = self._storyboard_thumb_key(item)
-        cached = self._sb_thumb_cache.get(key)
-
-        def apply(image, index=index, card=card):
-            try:
-                if not card.winfo_exists() or card not in self._sb_widgets:
-                    return
-                label = getattr(card, "_thumb_label", None)
-                if label is None or not label.winfo_exists():
-                    return
-                photo = ImageTk.PhotoImage(image, master=self.root)
-                self._sb_photo_refs[index] = photo
-                label.configure(image=photo, text="", width=0, height=0)
-            except tk.TclError:
-                pass
-
-        if cached is not None:
-            apply(cached)
-            return
-
-        def worker():
-            try:
-                image = self._make_storyboard_thumb(item)
-            except Exception:
+    def _apply_storyboard_thumb(self, card, index, image):
+        try:
+            if not card.winfo_exists() or card not in self._sb_widgets:
                 return
-            self._post_ui(apply, image)
+            label = getattr(card, "_thumb_label", None)
+            if label is None or not label.winfo_exists():
+                return
+            photo = ImageTk.PhotoImage(image, master=self.root)
+            self._sb_photo_refs[index] = photo
+            label.configure(image=photo, text="", width=0, height=0)
+        except tk.TclError:
+            pass
+
+    def _queue_storyboard_thumbs(self, pending, token):
+        def worker():
+            for index, item, card in pending:
+                if token != getattr(self, "_sb_token", 0):
+                    break
+                try:
+                    image = self._make_storyboard_thumb(item)
+                except Exception:
+                    continue
+                self._post_ui(self._apply_storyboard_thumb, card, index, image)
 
         threading.Thread(target=worker, daemon=True).start()
 

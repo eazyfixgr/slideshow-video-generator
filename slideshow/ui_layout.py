@@ -427,13 +427,14 @@ class LayoutMixin:
     def _selection_changed(self):
         self._refresh_stage()
         self.render_storyboard()
-        if getattr(self, "inspector_view", "story") != "captions":
+        if getattr(self, "inspector_view", "captions") != "captions":
             self._render_inspector()
         self._schedule_preview(150)
 
-    def _refresh_inspector_after_media(self):
-        if (hasattr(self, "inspector_content") and
-                getattr(self, "inspector_view", "story") != "captions"):
+    def _refresh_inspector_after_media(self, force=False):
+        if not hasattr(self, "inspector_content"):
+            return
+        if force or getattr(self, "inspector_view", "captions") != "captions":
             self._render_inspector()
 
     def select_scene(self, index, preview=True, sync_inspector=True):
@@ -447,7 +448,7 @@ class LayoutMixin:
         self._refresh_selection()
         self._refresh_stage()
         self.render_storyboard()
-        if sync_inspector and getattr(self, "inspector_view", "story") != "captions":
+        if sync_inspector and getattr(self, "inspector_view", "captions") != "captions":
             self._render_inspector()
         if preview:
             self._schedule_preview(120)

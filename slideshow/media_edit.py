@@ -15,14 +15,32 @@ from typing import Dict, List, Optional
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 
-from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhance,
-                   VideoFileClip, AudioFileClip, concatenate_audioclips, np,
-                   DND_FILES, TkinterDnD, TKDND_AVAILABLE)
+from .deps import (Image, ImageTk, ImageOps, ImageFilter, ImageDraw, ImageFont,
+                   ImageEnhance, VideoFileClip, AudioFileClip, concatenate_audioclips,
+                   np, DND_FILES, TkinterDnD, TKDND_AVAILABLE)
 from .slide_design import normalize_presentation
 
 
 class MediaEditMixin:
     """Per-media, non-destructive edit data: crop / brightness / colour / trim."""
+
+    @staticmethod
+    def open_thumbnail_image(path, max_edge=512, apply_exif=True):
+        """Open a photo cheaply for thumbnails (JPEG draft + optional EXIF)."""
+        image = Image.open(path)
+        try:
+            image.draft("RGB", (max_edge, max_edge))
+        except Exception:
+            pass
+        return ImageOps.exif_transpose(image) if apply_exif else image
+
+    @staticmethod
+    def read_exif_orientation(path):
+        try:
+            with Image.open(path) as image:
+                return int(image.getexif().get(274, 1) or 1)
+        except Exception:
+            return 1
 
     @staticmethod
     def default_edit(m_type, project_template=None):
@@ -58,8 +76,13 @@ class MediaEditMixin:
         return (m_type, path, base)
 
     def _new_item(self, m_type, path):
-        return (m_type, path, self.default_edit(
-            m_type, project_template=getattr(self, "project_template", None)))
+        edit = self.default_edit(
+            m_type, project_template=getattr(self, "project_template", None))
+        if m_type == "image":
+            orientation = self.read_exif_orientation(path)
+            if orientation != 1:
+                edit["exif_orientation"] = orientation
+        return (m_type, path, edit)
 
 
     def item_presentation(self, edit):
@@ -303,8 +326,13 @@ class MediaEditMixin:
         coordinates), then crop and the colour work.
         """
         edit = edit or {}
-        img = img.convert("RGB")
         rot = int(edit.get("rotate", 0) or 0) % 360
+        if edit.get("exif_orientation"):
+            try:
+                img = ImageOps.exif_transpose(img)
+            except Exception:
+                pass
+        img = img.convert("RGB")
         if rot:
             img = self._rotate_image(img, rot)
         img = self._apply_erase(img, edit.get("erase"), path)

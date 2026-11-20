@@ -15,9 +15,9 @@ from typing import Dict, List, Optional
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 
-from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhance,
-                   VideoFileClip, AudioFileClip, concatenate_audioclips, np,
-                   DND_FILES, TkinterDnD, TKDND_AVAILABLE)
+from .deps import (Image, ImageTk, ImageOps, ImageFilter, ImageDraw, ImageFont,
+                   ImageEnhance, VideoFileClip, AudioFileClip, concatenate_audioclips,
+                   np, DND_FILES, TkinterDnD, TKDND_AVAILABLE)
 from .slide_design import (compose_design_frame, legacy_text, normalize_presentation,
                            presentation_fields, TEMPLATES)
 
@@ -120,7 +120,7 @@ class RenderMixin:
             if item:
                 img = Image.open(item[1])
                 return self._apply_image_edit(img, item[2], item[1], m_type="image")
-            img = Image.open(path)
+            img = ImageOps.exif_transpose(Image.open(path))
             img.load()
             return img.convert("RGB")
         except Exception:

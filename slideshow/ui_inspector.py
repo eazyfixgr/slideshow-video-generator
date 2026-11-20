@@ -22,7 +22,7 @@ TRANSITIONS = {
     "Smooth right": "smoothright",
 }
 TRANSITION_BY_VALUE = {value: label for label, value in TRANSITIONS.items()}
-INSPECTOR_TABS = (("story", "Storyboard"), ("captions", "Captions"),
+INSPECTOR_TABS = (("captions", "Captions"), ("story", "Storyboard"),
                   ("design", "Slide Design"))
 
 
@@ -53,7 +53,7 @@ class InspectorMixin:
 
         self.inspector_content = tk.Frame(parent, bg=P["panel"])
         self.inspector_content.grid(row=2, column=0, sticky="nsew")
-        self.inspector_view = getattr(self, "inspector_view", "story")
+        self.inspector_view = getattr(self, "inspector_view", "captions")
         self._render_inspector()
 
     def _set_inspector_view(self, view):
@@ -63,7 +63,7 @@ class InspectorMixin:
     def _render_inspector(self):
         if not hasattr(self, "inspector_content"):
             return
-        view = getattr(self, "inspector_view", "story")
+        view = getattr(self, "inspector_view", "captions")
         for key, button in getattr(self, "_inspector_tab_buttons", {}).items():
             try:
                 button.configure(background=(P["accent_faint"] if key == view else P["panel"]),

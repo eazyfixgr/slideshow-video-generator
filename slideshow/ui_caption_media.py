@@ -649,7 +649,8 @@ class MediaCaptionMixin:
         apply_style_button.config(command=apply_style_to_scope)
 
         def load_thumbnail(index, path):
-            image = (self._video_first_frame(path) if media_type == "video" else Image.open(path))
+            image = (self._video_first_frame(path) if media_type == "video"
+                     else self.open_thumbnail_image(path, 400))
             if media_type == "image":
                 image.load()
             image = image.convert("RGB")

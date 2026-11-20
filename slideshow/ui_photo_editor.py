@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from pathlib import Path
 
-from .deps import Image, ImageTk, ImageEnhance
+from .deps import Image, ImageTk, ImageOps, ImageEnhance
 from .ui_erase import ErasePanel
 
 
@@ -14,7 +14,10 @@ class PhotoEditorMixin:
     def _open_photo_editor(self, idx):
         _, path, edit = self.media_files[idx]
         try:
-            src = Image.open(path).convert("RGB")
+            src = Image.open(path)
+            if edit.get("exif_orientation"):
+                src = ImageOps.exif_transpose(src)
+            src = src.convert("RGB")
         except Exception as e:
             messagebox.showerror("Edit", f"Δεν μπόρεσα να ανοίξω τη φωτογραφία:\n{e}")
             return

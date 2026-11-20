@@ -452,7 +452,7 @@ class WelcomeMixin:
                     if record["media_type"] == "video":
                         image = self._video_first_frame(path)
                     else:
-                        image = Image.open(path)
+                        image = self.open_thumbnail_image(path, 1200)
                         image.load()
                 except Exception:
                     image = None
@@ -661,7 +661,7 @@ class WelcomeMixin:
                         if record["media_type"] == "video":
                             image = self._video_first_frame(record["media_path"])
                         else:
-                            image = Image.open(record["media_path"])
+                            image = self.open_thumbnail_image(record["media_path"], 800)
                             image.load()
                     except Exception:
                         image = None
