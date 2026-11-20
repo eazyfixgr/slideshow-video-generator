@@ -50,6 +50,9 @@ class CaptionsMixin(MediaCaptionMixin):
         return self.open_text_captions_manager()
 
     def open_text_captions_manager(self, initial_strategy=None, initial_media=None):
+        commit_captions = getattr(self, "_commit_pending_caption_apply", None)
+        if commit_captions:
+            commit_captions()
         existing = getattr(self, "_text_captions_dialog", None)
         if existing is not None:
             try:

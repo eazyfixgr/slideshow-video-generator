@@ -373,6 +373,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
     def return_to_welcome(self):
         """Hide the editor and show the profile / recent-project screen."""
+        commit_captions = getattr(self, "_commit_pending_caption_apply", None)
+        if commit_captions:
+            commit_captions()
         if self.is_modified:
             answer = messagebox.askyesnocancel(
                 "Έναρξη",
@@ -728,6 +731,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         ``.json`` file and an empty entry in the Load list) and the name field
         is focused so the user can fix it.
         """
+        commit_captions = getattr(self, "_commit_pending_caption_apply", None)
+        if commit_captions:
+            commit_captions()
         n = self.name_var.get().strip()
         if not n:
             messagebox.showwarning(
@@ -1018,6 +1024,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
 
     def on_closing(self):
+        commit_captions = getattr(self, "_commit_pending_caption_apply", None)
+        if commit_captions:
+            commit_captions()
         self._save_window_state()
         try:
             self.save_settings()

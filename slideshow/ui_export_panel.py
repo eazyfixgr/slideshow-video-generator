@@ -150,6 +150,9 @@ class ExportPanelMixin:
         self.save_settings()
 
     def show_export_panel(self):
+        commit_captions = getattr(self, "_commit_pending_caption_apply", None)
+        if commit_captions:
+            commit_captions()
         self._update_export_summary()
         self._refresh_export_estimate()
         try:
