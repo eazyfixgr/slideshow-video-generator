@@ -121,11 +121,8 @@ class TimelineMixin:
 
         notebook = ttk.Notebook(dlg)
         edit_tab = ttk.Frame(notebook)
-        presentation_tab = ttk.Frame(notebook)
         notebook.add(edit_tab, text="  ✂  Crop, Trim & Ήχος  ")
-        notebook.add(presentation_tab, text="  ✨  Presentation / Slide Design  ")
         notebook.pack(fill='both', expand=True, padx=10, pady=(8, 0))
-        self._build_presentation_tab(presentation_tab, idx)
 
         state = {"crop": list(edit["crop"]) if edit.get("crop") else None,
                  "play": existing[0][0] if existing else 0.0, "seg": 0,

@@ -23,28 +23,46 @@ class LibraryMixin:
     """The media library: adding/removing/reordering items and their badges."""
 
     # ----------------------------------------------------------- undo/redo
+    def _editor_snapshot(self):
+        return copy.deepcopy({"media": self.media_files,
+                              "caption_mode": self.project_caption_mode,
+                              "all": self.project_text_all,
+                              "photos": self.project_text_photos,
+                              "videos": self.project_text_videos,
+                              "instructions": self.project_ai_instructions})
+
+    def _restore_editor_snapshot(self, snapshot):
+        self.media_files = snapshot["media"]
+        self.project_caption_mode = snapshot["caption_mode"]
+        self.project_text_all = snapshot["all"]
+        self.project_text_photos = snapshot["photos"]
+        self.project_text_videos = snapshot["videos"]
+        self.project_ai_instructions = snapshot["instructions"]
+
     def push_undo(self):
-        """Snapshot the media list before a structural change."""
-        self._undo_stack.append(copy.deepcopy(self.media_files))
+        """Snapshot media and caption strategy before an edit."""
+        self._undo_stack.append(self._editor_snapshot())
         if len(self._undo_stack) > 30:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
 
     def undo(self):
+        self._commit_pending_caption_apply()
         if not self._undo_stack:
             return
-        self._redo_stack.append(copy.deepcopy(self.media_files))
-        self.media_files = self._undo_stack.pop()
+        self._redo_stack.append(self._editor_snapshot())
+        self._restore_editor_snapshot(self._undo_stack.pop())
         self.selected_indices = set()
         self.is_modified = True
         self.update_media_display()
         self._refresh_inspector_after_media()
 
     def redo(self):
+        self._commit_pending_caption_apply()
         if not self._redo_stack:
             return
-        self._undo_stack.append(copy.deepcopy(self.media_files))
-        self.media_files = self._redo_stack.pop()
+        self._undo_stack.append(self._editor_snapshot())
+        self._restore_editor_snapshot(self._redo_stack.pop())
         self.selected_indices = set()
         self.is_modified = True
         self.update_media_display()
@@ -106,6 +124,7 @@ class LibraryMixin:
             self.update_media_display()
 
     def clear_media(self):
+        self._commit_pending_caption_apply()
         if self.media_files and not messagebox.askyesno(
                 "Καθαρισμός", "Να αδειάσει όλη η βιβλιοθήκη;\n\n(Μπορείς να το αναιρέσεις με Undo)"):
             return
@@ -121,6 +140,7 @@ class LibraryMixin:
         return sorted(i for i in self.selected_indices if 0 <= i < len(self.media_files))
 
     def _select_click(self, idx, event):
+        self._commit_pending_caption_apply()
         ctrl = bool(event.state & 0x0004)
         shift = bool(event.state & 0x0001)
         if ctrl:
@@ -419,6 +439,7 @@ class LibraryMixin:
                 pass
 
     def _move_selection_to(self, target):
+        self._commit_pending_caption_apply()
         sel = self._selected()
         if not sel or target is None or target in sel:
             self._refresh_selection()
@@ -494,6 +515,7 @@ class LibraryMixin:
 
     # ------------------------------------------------------------ editing
     def delete_selected(self):
+        self._commit_pending_caption_apply()
         sel = self._selected()
         if not sel:
             if self.media_files:

@@ -7,13 +7,14 @@ from tkinter import ttk
 
 from .deps import ImageTk, DND_FILES, TKDND_AVAILABLE
 from .profiles import initials
+from .ui_workspace_layout import WorkspaceLayoutMixin
 from .slide_design import TEMPLATES, normalize_presentation, normalize_template
 from .ui_theme import MODERN_PALETTE as P
 from .ui_widgets import (ScrollFrame, aspect_label, avatar_image, flat_button,
                          format_duration, primary_button)
 
 
-class LayoutMixin:
+class LayoutMixin(WorkspaceLayoutMixin):
     """The editor shell: header, three-column workspace, stage and status bar."""
 
     # ------------------------------------------------------------- header
@@ -164,7 +165,8 @@ class LayoutMixin:
 
     def _build_workspace(self):
         workspace = tk.PanedWindow(self.root, orient="horizontal", bg=P["border"],
-                                   sashwidth=6, sashrelief="flat", bd=0)
+                                   sashwidth=10, sashrelief="raised", showhandle=True,
+                                   handlesize=10, opaqueresize=True, bd=0)
         workspace.grid(row=1, column=0, sticky="nsew", padx=10, pady=(8, 6))
         self.workspace = workspace
 
@@ -174,11 +176,12 @@ class LayoutMixin:
         inspector = tk.Frame(workspace, bg=P["panel"], highlightbackground=P["border"],
                              highlightthickness=1)
         workspace.add(left, minsize=190, width=250, stretch="never")
-        workspace.add(stage, minsize=420, stretch="always")
-        workspace.add(inspector, minsize=270, width=330, stretch="never")
+        workspace.add(stage, minsize=300, stretch="always")
+        workspace.add(inspector, minsize=240, width=360, stretch="never")
         self._build_library_panel(left)
         self._build_stage_panel(stage)
         self._build_inspector(inspector)
+        self._setup_workspace_layout()
 
     def _build_library_panel(self, parent):
         parent.columnconfigure(0, weight=1)
@@ -427,17 +430,16 @@ class LayoutMixin:
     def _selection_changed(self):
         self._refresh_stage()
         self.render_storyboard()
-        if getattr(self, "inspector_view", "captions") != "captions":
-            self._render_inspector()
+        self._render_inspector()
         self._schedule_preview(150)
 
     def _refresh_inspector_after_media(self, force=False):
         if not hasattr(self, "inspector_content"):
             return
-        if force or getattr(self, "inspector_view", "captions") != "captions":
-            self._render_inspector()
+        self._render_inspector()
 
     def select_scene(self, index, preview=True, sync_inspector=True):
+        self._commit_pending_caption_apply()
         if not (0 <= index < len(getattr(self, "media_files", []))):
             return
         self.selected_indices = {index}
@@ -448,7 +450,7 @@ class LayoutMixin:
         self._refresh_selection()
         self._refresh_stage()
         self.render_storyboard()
-        if sync_inspector and getattr(self, "inspector_view", "captions") != "captions":
+        if sync_inspector:
             self._render_inspector()
         if preview:
             self._schedule_preview(120)

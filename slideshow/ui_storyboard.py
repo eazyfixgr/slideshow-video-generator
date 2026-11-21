@@ -37,7 +37,7 @@ class StoryboardMixin:
                     background=P["panel"], foreground=P["muted"],
                     active_background=P["selected"], font=("Segoe UI", 8),
                     padx=8, pady=3).pack(side="right", padx=(6, 0))
-        flat_button(header, "Storyboard editor", self.open_storyboard_editor,
+        flat_button(header, "Captions", self.open_text_captions_manager,
                     background=P["panel"], foreground=P["muted"],
                     active_background=P["selected"], font=("Segoe UI", 8),
                     padx=8, pady=3).pack(side="right")

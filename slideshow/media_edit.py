@@ -78,6 +78,8 @@ class MediaEditMixin:
     def _new_item(self, m_type, path):
         edit = self.default_edit(
             m_type, project_template=getattr(self, "project_template", None))
+        if getattr(self, "project_caption_mode", None) == "individual":
+            edit["presentation"]["mode"] = "custom"
         if m_type == "image":
             orientation = self.read_exif_orientation(path)
             if orientation != 1:
