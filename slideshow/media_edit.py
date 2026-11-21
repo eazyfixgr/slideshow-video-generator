@@ -45,6 +45,7 @@ class MediaEditMixin:
     @staticmethod
     def default_edit(m_type, project_template=None):
         presentation = normalize_presentation(project_template=project_template)
+        presentation["style_overrides"] = []
         # "rotate" is the clockwise rotation in degrees (0/90/180/270), applied
         # before crop and erase so every stored coordinate is in that orientation.
         if m_type == "image":

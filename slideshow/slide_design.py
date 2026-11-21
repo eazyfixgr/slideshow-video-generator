@@ -49,6 +49,7 @@ DEFAULT_PRESENTATION = {
     "scene_id": "",
     "mode": "global",
     "template": INHERIT_TEMPLATE,
+    "template_name": "",
     "title": "",
     "subtitle": "",
     "description": "",
@@ -70,6 +71,11 @@ DEFAULT_PRESENTATION = {
     "panel_color": "#111B2B",
     "accent_color": "#D6B86A",
     "panel_style": "solid",
+    "panel_opacity": None,
+    "panel_width_pct": 0,
+    "panel_padding_pct": 0,
+    "panel_min_height_pct": 0,
+    "text_layout": None,
     "featured_enabled": False,
     "featured_text": "FEATURED",
     "duration": None,
@@ -83,8 +89,9 @@ DEFAULT_PRESENTATION = {
 DESIGN_FIELDS = (
     "template", "text_position", "text_align", "featured_enabled", "featured_text",
     "font_family", "font_size", "text_color", "panel_color", "accent_color",
-    "panel_style", "duration", "logo_enabled", "logo_path", "transition",
-    "transition_duration", "motion",
+    "panel_style", "panel_opacity", "panel_width_pct", "panel_padding_pct",
+    "panel_min_height_pct", "text_layout", "duration", "logo_enabled", "logo_path",
+    "transition", "transition_duration", "motion",
 )
 
 _MODES = {"global", "custom", "none", "combine"}
@@ -105,6 +112,12 @@ def normalize_presentation(value=None, scene_id=None, project_template=None):
         data["mode"] = "global"
     old_template = source.get("template")
     data["template"] = normalize_template(data.get("template"), INHERIT_TEMPLATE)
+    data["template_name"] = str(data.get("template_name") or "").strip()
+    if isinstance(source.get("style_overrides"), list):
+        data["style_overrides"] = [str(key) for key in source["style_overrides"]
+                                   if isinstance(key, str)]
+    else:
+        data.pop("style_overrides", None)
     if "font_size" not in source:
         default_template = data["template"]
         if default_template == INHERIT_TEMPLATE and project_template:
@@ -138,9 +151,33 @@ def normalize_presentation(value=None, scene_id=None, project_template=None):
         value = str(data.get(key) or fallback)
         data[key] = value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else fallback
     try:
-        data["font_size"] = max(0, min(200, int(data.get("font_size") or 0)))
+        data["font_size"] = max(0, min(400, int(data.get("font_size") or 0)))
     except (TypeError, ValueError):
         data["font_size"] = 0
+    opacity = data.get("panel_opacity")
+    if opacity is None:
+        data["panel_opacity"] = None
+    else:
+        try:
+            data["panel_opacity"] = max(0, min(100, int(float(opacity))))
+        except (TypeError, ValueError):
+            data["panel_opacity"] = None
+    try:
+        data["panel_width_pct"] = max(0, min(100, int(data.get("panel_width_pct") or 0)))
+    except (TypeError, ValueError):
+        data["panel_width_pct"] = 0
+    try:
+        data["panel_padding_pct"] = round(max(
+            0.0, min(15.0, float(data.get("panel_padding_pct") or 0))), 2)
+    except (TypeError, ValueError):
+        data["panel_padding_pct"] = 0
+    try:
+        data["panel_min_height_pct"] = max(
+            0, min(80, int(data.get("panel_min_height_pct") or 0)))
+    except (TypeError, ValueError):
+        data["panel_min_height_pct"] = 0
+    if data.get("text_layout") not in ("overlay", "below"):
+        data["text_layout"] = None
     try:
         duration = float(data.get("duration")) if data.get("duration") is not None else None
     except (TypeError, ValueError):
@@ -166,6 +203,7 @@ def has_presentation_settings(value, project_template="legacy"):
     return bool(data["mode"] != "global" or
                 data["template"] not in ("legacy", INHERIT_TEMPLATE) or
                 (data["template"] == INHERIT_TEMPLATE and project_template != "legacy") or
+                data.get("template_name") or data.get("style_overrides") or
                 data["duration"] is not None or data["logo_enabled"] or
                 data["compare_path"] or data["transition"] != "global" or
                 data["transition_duration"] is not None)
@@ -417,13 +455,23 @@ def render_design_layers(width, height, presentation, fields, before_image=None,
     its own layer and is painted into ``image_rect`` by the caller.
     """
     p = normalize_presentation(presentation)
-    if auto_position_video:
+    if auto_position_video and not p.get("text_layout"):
         p["text_position"] = "bottom"
     template = p["template"]
     w, h = max(2, int(width)), max(2, int(height))
     panel = p["panel_color"]
     accent = p["accent_color"]
     white = p["text_color"]
+    layout = p.get("text_layout") or {
+        "navy_gold": "below", "intro_outro": "below",
+        "cinematic": "overlay", "lower_third": "overlay", "legacy": "overlay",
+    }.get(template, "overlay")
+    below_media = bool(auto_position_video or layout == "below")
+    opacity = p.get("panel_opacity")
+    panel_alpha = None if opacity is None else max(0, min(255, round(float(opacity) * 2.55)))
+    width_pct = int(p.get("panel_width_pct") or 0)
+    padding_pct = float(p.get("panel_padding_pct") or 0)
+    min_height_pct = int(p.get("panel_min_height_pct") or 0)
     base = Image.new("RGB", (w, h), panel if template != "cinematic" else "#101010")
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -436,7 +484,8 @@ def render_design_layers(width, height, presentation, fields, before_image=None,
     logo_area = None
 
     if template == "navy_gold":
-        pad = max(12, int(min(w, h) * .025))
+        pad = max(12, int(min(w, h) * .025),
+                  int(min(w, h) * padding_pct / 100))
         logo_reserve = max(24, int(min(w, h) * .075)) if (
             p.get("logo_enabled") and p.get("logo_path") and os.path.isfile(p["logo_path"])) else 0
         probe = ImageDraw.Draw(Image.new("RGBA", (w, h)))
@@ -444,15 +493,37 @@ def render_design_layers(width, height, presentation, fields, before_image=None,
             probe, (0, 0, w - margin * 2, int(h * .45)), fields, p,
             accent, white, margin, measure_only=True)
         panel_h = min(int(h * .48), max(int(h * .12), content_h + 2 * pad + logo_reserve))
-        panel_y = 0 if p["text_position"] == "top" else h - panel_h
-        image_y = panel_h if panel_y == 0 else 0
-        rect = (0, image_y, w, h - panel_h)
+        if min_height_pct:
+            panel_h = min(int(h * .85), max(panel_h, int(h * min_height_pct / 100)))
+        if below_media:
+            panel_y = h - panel_h
+        elif p["text_position"] == "top":
+            panel_y = 0
+        elif p["text_position"] == "center":
+            panel_y = max(0, (h - panel_h) // 2)
+        else:
+            panel_y = h - panel_h
+        panel_x, panel_w = 0, w
+        if 0 < width_pct < 100:
+            panel_w = max(int(w * .2), int(w * width_pct / 100))
+            panel_x = (w - panel_w) // 2
+        if below_media:
+            rect = (0, 0, w, h - panel_h)
+        else:
+            rect = (0, 0, w, h)
+            alpha = (panel_alpha if panel_alpha is not None else 255)
+            if alpha > 0:
+                draw.rounded_rectangle(
+                    (panel_x, panel_y, panel_x + panel_w, panel_y + panel_h),
+                    radius=max(8, margin // 2),
+                    fill=_color_rgba(panel, alpha))
         divider_y = panel_h if panel_y == 0 else panel_y
-        draw.rectangle((0, divider_y, w, min(h, divider_y + max(3, int(h * 0.004))),),
-                       fill=accent)
-        text_box = (margin, panel_y + pad, w - margin * 2,
+        draw.rectangle((panel_x, divider_y, panel_x + panel_w,
+                        min(h, divider_y + max(3, int(h * 0.004))),), fill=accent)
+        text_box = (panel_x + pad, panel_y + pad,
+                    max(0, panel_w - 2 * pad),
                     max(0, panel_h - 2 * pad - logo_reserve))
-        logo_area = (0, panel_y, w, panel_h)
+        logo_area = (panel_x, panel_y, panel_w, panel_h)
     elif template == "real_estate":
         pad = max(12, int(min(w, h) * .025))
         logo_reserve = max(24, int(min(w, h) * .075)) if (
@@ -485,13 +556,18 @@ def render_design_layers(width, height, presentation, fields, before_image=None,
             draw.rectangle((0, rh, w, min(h, rh + max(3, int(h * 0.004))),), fill=accent)
             text_box = (margin, rh + margin, w - margin * 2, max(0, h - rh - margin * 2))
     elif template == "cinematic":
-        alpha = 178 if p["panel_style"] == "solid" else 132
+        alpha = (panel_alpha if panel_alpha is not None else
+                 (178 if p["panel_style"] == "solid" else 132))
         top = int(h * 0.53)
         for gy in range(top, h):
             a = int(alpha * (gy - top) / max(1, h - top))
-            draw.line((0, gy, w, gy), fill=(0, 0, 0, a))
-        text_box = (margin, int(h * 0.62), w - margin * 2, int(h * 0.34))
-        if auto_position_video:
+            draw.line((0, gy, w, gy), fill=_color_rgba(panel, a))
+        box_w = int(w * width_pct / 100) if 0 < width_pct < 100 else w - margin * 2
+        box_x = (w - box_w) // 2
+        pad = max(0, int(min(w, h) * padding_pct / 100))
+        text_box = (box_x + pad, int(h * 0.62) + pad,
+                    max(1, box_w - pad * 2), max(1, int(h * 0.34) - pad * 2))
+        if below_media:
             rect = (0, 0, w, int(h * 0.60))
     elif template == "lower_third":
         visible_text_keys = ("title", "subtitle", "description", "category", "location",
@@ -503,40 +579,65 @@ def render_design_layers(width, height, presentation, fields, before_image=None,
             _overflow, content_h, content_w = _draw_content(
                 probe, (0, 0, content_width, content_limit), fields, p,
                 accent, white, margin, measure_only=True)
-            pad = max(14, int(min(w, h) * 0.026))
+            pad = max(14, int(min(w, h) * 0.026),
+                      int(min(w, h) * padding_pct / 100))
             has_logo = bool(p.get("logo_enabled") and p.get("logo_path") and
                             os.path.isfile(p["logo_path"]))
             logo_reserve = max(24, int(min(w, h) * 0.075)) if has_logo else 0
             panel_h = min(h - margin * 2,
                           max(2 * pad + logo_reserve + 1, content_h + 2 * pad + logo_reserve))
+            if min_height_pct:
+                panel_h = min(h - margin * 2,
+                              max(panel_h, int(h * min_height_pct / 100)))
             panel_w = min(w - margin * 2,
                           max(int(w * 0.22), int(content_w + 2 * pad)))
+            if width_pct:
+                panel_w = max(int(w * 0.2), min(w - margin * 2,
+                                                int(w * width_pct / 100)))
             panel_x = (w - panel_w) // 2
             position = p.get("text_position", "bottom")
-            if position == "top":
+            if below_media:
+                panel_y = h - panel_h - margin
+            elif position == "top":
                 panel_y = margin
             elif position == "center":
                 panel_y = max(margin, (h - panel_h) // 2)
             else:
                 panel_y = h - panel_h - margin
-            alpha = 205 if p["panel_style"] == "solid" else 145
+            alpha = (panel_alpha if panel_alpha is not None else
+                     (205 if p["panel_style"] == "solid" else 145))
             draw.rounded_rectangle((panel_x, panel_y, panel_x + panel_w, panel_y + panel_h),
-                                   radius=max(8, margin // 3), fill=(12, 19, 29, alpha),
-                                   outline=_color_rgba(accent, 220), width=max(1, int(h * 0.002)))
+                                   radius=max(8, margin // 3),
+                                   fill=_color_rgba(panel, alpha),
+                                   outline=_color_rgba(accent, 220),
+                                   width=max(1, int(h * 0.002)))
             text_box = (panel_x + pad, panel_y + pad,
                         max(1, panel_w - 2 * pad), max(1, content_h))
             logo_area = (panel_x, panel_y, panel_w, panel_h)
-            if auto_position_video:
+            if below_media:
                 rect = (0, 0, w, max(2, panel_y))
     elif template == "intro_outro":
         draw.rectangle((0, 0, w, max(2, int(h * 0.018))), fill=accent)
         draw.rectangle((0, h - max(2, int(h * 0.018)), w, h), fill=accent)
-        text_box = (margin * 2, y + rh + margin, w - margin * 4,
-                    max(0, h - y - rh - margin * 2))
-        if auto_position_video:
-            rect = (0, 0, w, int(h * 0.58))
-            text_box = (margin * 2, int(h * 0.62), w - margin * 4,
-                        max(0, h - int(h * 0.62) - margin * 2))
+        box_w = int(w * width_pct / 100) if 0 < width_pct < 100 else w - margin * 4
+        box_x = (w - box_w) // 2
+        pad = max(0, int(min(w, h) * padding_pct / 100))
+        if below_media:
+            text_box = (box_x + pad, y + rh + margin + pad,
+                        max(1, box_w - pad * 2),
+                        max(0, h - y - rh - margin * 2 - pad * 2))
+        else:
+            rect = (0, 0, w, h)
+            text_box = (box_x + pad, int(h * 0.62) + pad,
+                        max(1, box_w - pad * 2),
+                        max(1, int(h * 0.34) - pad * 2))
+        alpha = (panel_alpha if panel_alpha is not None else 0)
+        if alpha > 0:
+            draw.rounded_rectangle((text_box[0] - pad, text_box[1] - pad,
+                                    text_box[0] + text_box[2] + pad,
+                                    text_box[1] + text_box[3] + pad),
+                                   radius=max(8, margin // 3),
+                                   fill=_color_rgba(panel, alpha))
     elif template == "before_after":
         if before_image is not None:
             before_rect = (0, 0, x, h) if w / h >= 1.0 else (0, 0, w, y)

@@ -2,16 +2,17 @@
 
 import copy
 import tkinter as tk
-from tkinter import ttk, filedialog, colorchooser
+from tkinter import ttk, filedialog, colorchooser, messagebox
 
-from .slide_design import (TEMPLATES, DESIGN_FIELDS, normalize_presentation,
-                           INHERIT_TEMPLATE, INHERIT_TEMPLATE_LABEL)
+from .slide_design import INHERIT_TEMPLATE, normalize_presentation
+from .slide_templates import (FONT_CHOICES, PANEL_STYLE_CHOICES, STYLE_FIELDS,
+                              TEXT_ALIGN_CHOICES, TEXT_LAYOUT_CHOICES,
+                              TEXT_POSITION_CHOICES, read_template_registry,
+                              template_base, template_style)
 from .ui_caption_inspector import CaptionInspectorMixin
-from .design_templates import (read_design_templates, write_design_templates,
-                               design_template_choices)
 
-STYLE_FIELDS = tuple(key for key in DESIGN_FIELDS
-                     if key not in ("duration", "transition", "transition_duration"))
+DESIGN_SCOPES = ("Όλο το project", "Τρέχουσα σκηνή", "Επιλεγμένες σκηνές",
+                 "Όλες οι σκηνές")
 
 
 class InlineEditorsMixin(CaptionInspectorMixin):
@@ -21,7 +22,10 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         job = getattr(self, "_caption_apply_job", None)
         self._caption_apply_job = None
         if job:
-            self.root.after_cancel(job)
+            try:
+                self.root.after_cancel(job)
+            except tk.TclError:
+                pass
 
     def _commit_pending_caption_apply(self):
         if getattr(self, "_inline_committing", False):
@@ -65,6 +69,35 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         var.trace_add("write", lambda *_: changed())
         return var, widget
 
+    def _inline_slider(self, parent, label, value, changed, low=0, high=100,
+                       suffix="%"):
+        self._inline_label(parent, label, pady=(7, 2))
+        row = tk.Frame(parent, bg=self._inline_bg(parent))
+        row.pack(fill="x")
+        value_lbl = tk.Label(row, width=7, anchor="e",
+                             bg=self._inline_bg(parent), fg="#9da9b9",
+                             font=("Segoe UI", 8))
+        value_lbl.pack(side="right")
+
+        def update_display(number):
+            number = int(float(number))
+            value_lbl.configure(text="Auto" if number == 0 and suffix != "%"
+                                else f"{number}{suffix}")
+
+        scale = tk.Scale(row, from_=low, to=high, orient="horizontal",
+                         bg=self._inline_bg(parent), fg="#f1f3f7",
+                         troughcolor="#12161d", highlightthickness=0,
+                         activebackground="#e8bd79", showvalue=False,
+                         command=lambda number: (update_display(number), changed()))
+        scale.pack(side="left", fill="x", expand=True)
+        scale.set(int(value or 0))
+        update_display(scale.get())
+        return scale
+
+    @staticmethod
+    def _inline_bg(_widget):
+        return "#171b22"
+
     def _inline_text(self, parent, label, value, changed, height=3):
         self._inline_label(parent, label, pady=(7, 2))
         widget = tk.Text(parent, height=height, width=18, wrap="word", undo=True)
@@ -95,155 +128,287 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         combo.bind("<<ComboboxSelected>>", select)
         return current
 
+    # ----------------------------------------------------------- design panel
     def _render_design_inspector(self, body):
         self.inspector_title_var.set("Slide Design")
+        registry = read_template_registry(self.settings)
+        names = list(registry)
+        default_name = self._default_template_name(registry)
+        scope = self._inline_scope(body, DESIGN_SCOPES, "_inline_design_scope",
+                                   "Όλο το project")
         index, item = self._selected_item()
-        if item is None:
-            self._empty_inspector(body, "Πρόσθεσε media για να επεξεργαστείς την εμφάνιση.")
+        project_scope = scope == "Όλο το project"
+        if scope == "Τρέχουσα σκηνή":
+            targets = [item] if item is not None else []
+        elif scope == "Επιλεγμένες σκηνές":
+            targets = [self.media_files[i] for i in self._selected()]
+        elif scope == "Όλες οι σκηνές":
+            targets = list(self.media_files)
+        else:
+            targets = list(self.media_files)
+
+        if not project_scope and not targets:
+            self._empty_inspector(body, "Διάλεξε μια σκηνή ή μια ομάδα media για να "
+                                        "αλλάξεις την εμφάνισή τους.")
             return
-        scope = self._inline_scope(body, ("Τρέχουσα σκηνή", "Επιλεγμένες σκηνές", "Όλες οι σκηνές"),
-                                   "_inline_design_scope", "Τρέχουσα σκηνή")
-        media = self.media_files
-        targets = ([item] if scope == "Τρέχουσα σκηνή" else
-                   [media[i] for i in self._selected()] if scope == "Επιλεγμένες σκηνές" else list(media))
-        original = normalize_presentation(item[2].get("presentation"), project_template=self.project_template)
-        draft = copy.deepcopy(original)
-        saved = read_design_templates(self.settings)
+
+        if project_scope:
+            current_name = self._effective_project_template_name(registry)
+            draft = template_style(current_name, registry)
+        else:
+            resolved = self._resolve_presentation_style(
+                normalize_presentation(targets[0][2].get("presentation"),
+                                       project_template=self.project_template))
+            current_name = resolved.get("template_name") or default_name
+            if current_name not in registry:
+                current_name = default_name
+            draft = {key: resolved[key] for key in STYLE_FIELDS}
         dirty = {"value": False, "loading": False}
+        status = tk.StringVar(value="")
         variables = {}
         choice_values = {}
-        status = tk.StringVar()
 
         def changed():
             if not dirty["loading"]:
                 dirty["value"] = True
-                self._inline_changed()
+                status.set("Πάτησε «Εφαρμογή εμφάνισης» για το project.")
+
+        self._inline_label(
+            body, "Οι αλλαγές εδώ είναι overrides του project. Για μόνιμες αλλαγές "
+                  "template: Settings → Slideshow Settings.", pady=(10, 2))
+
+        def template_changed(_event=None):
+            name = template_var.get()
+            if name not in registry:
+                return
+            entry = registry[name]
+            if project_scope:
+                self.set_project_template(name)
+                return
+            self.push_undo()
+            for target in targets:
+                edit = target[2]
+                current = normalize_presentation(edit.get("presentation"))
+                current["template"] = entry["base"]
+                current["template_name"] = name
+                current["style_overrides"] = []
+                current.pop("style_overrides", None)
+                current["style_overrides"] = []
+                edit["presentation"] = current
+            self.is_modified = True
+            self._inline_refresh()
+            self._render_inspector()
+
+        template_var, template_combo = self._inline_field(
+            body, "Template", current_name, lambda: None,
+            [f"{name}{'  (default)' if name == default_name else ''}" for name in names])
+        # Strip the display suffix before applying.
+        template_combo.configure(values=names)
+        template_var.set(current_name)
+        template_combo.bind("<<ComboboxSelected>>", template_changed, add="+")
+        self._render_slide_project_controls(body)
+        dirty["loading"] = True
 
         def field(label, key, choices=None):
             value = draft[key]
-            if isinstance(choices, dict):
-                choice_values[key] = choices
-                value = next(label for label, stored in choices.items() if stored == value)
             var, widget = self._inline_field(body, label, value, changed, choices)
             variables[key] = var
             return widget
 
-        def fill_variables():
-            for key, var in variables.items():
-                value = draft[key]
-                if key in choice_values:
-                    value = next(label for label, stored in choice_values[key].items()
-                                 if stored == value)
-                var.set(value)
+        def label_for(choices, value):
+            return next((label for label, stored in choices.items() if stored == value),
+                        next(iter(choices), ""))
 
-        labels = {INHERIT_TEMPLATE_LABEL: INHERIT_TEMPLATE, **{v: k for k, v in TEMPLATES.items()}}
-        template_name = next(label for label, key in labels.items() if key == original["template"])
-        template, template_combo = self._inline_field(body, "Template", template_name, changed,
-            design_template_choices(saved, TEMPLATES.values(), INHERIT_TEMPLATE_LABEL))
-
-        def choose_template(_event):
-            if template.get() in saved:
-                dirty["loading"] = True
-                draft.update(copy.deepcopy(saved[template.get()]))
-                fill_variables()
-                dirty["loading"] = False
-            changed()
-        template_combo.bind("<<ComboboxSelected>>", choose_template)
-        field("Θέση κειμένου", "text_position", {"Πάνω": "top", "Κέντρο": "center", "Κάτω": "bottom"})
-        field("Στοίχιση κειμένου", "text_align", {"Αριστερά": "left", "Κέντρο": "center", "Δεξιά": "right"})
-        field("Γραμματοσειρά", "font_family", ("", "Calibri", "Arial", "Verdana", "Georgia"))
+        field("Γραμματοσειρά", "font_family", FONT_CHOICES)
         field("Μέγεθος γραμματοσειράς", "font_size")
-        field("Πλαίσιο", "panel_style", {"Συμπαγές": "solid", "Ημιδιαφανές": "translucent"})
-        for key, label in (("text_color", "Χρώμα κειμένου"), ("panel_color", "Χρώμα πλαισίου"),
-                           ("accent_color", "Χρώμα έμφασης")):
-            field(label, key)
-            def choose(k=key):
-                result = colorchooser.askcolor(variables[k].get(), parent=self.root)[1]
-                if result:
-                    variables[k].set(result)
-            ttk.Button(body, text="Επιλογή χρώματος", command=choose).pack(anchor="e", pady=2)
-        for key, label in (("featured_enabled", "Εμφάνιση badge"), ("logo_enabled", "Λογότυπο")):
-            var = tk.BooleanVar(value=draft[key])
-            variables[key] = var
-            ttk.Checkbutton(body, text=label, variable=var, command=changed).pack(anchor="w", pady=6)
-        field("Κείμενο badge", "featured_text")
-        field("Αρχείο λογότυπου", "logo_path")
-        def choose_logo():
-            path = filedialog.askopenfilename(parent=self.root, filetypes=[("Logo", "*.png *.jpg *.jpeg")])
-            if path:
-                variables["logo_path"].set(path)
-        ttk.Button(body, text="Επιλογή λογότυπου", command=choose_logo).pack(fill="x", pady=3)
+        var, widget = self._inline_field(
+            body, "Θέση κειμένου", label_for(TEXT_POSITION_CHOICES,
+                                             draft["text_position"]),
+            changed, TEXT_POSITION_CHOICES)
+        variables["text_position"] = var
+        choice_values["text_position"] = TEXT_POSITION_CHOICES
+        var, widget = self._inline_field(
+            body, "Στοίχιση κειμένου", label_for(TEXT_ALIGN_CHOICES,
+                                                 draft["text_align"]),
+            changed, TEXT_ALIGN_CHOICES)
+        variables["text_align"] = var
+        choice_values["text_align"] = TEXT_ALIGN_CHOICES
+        var, widget = self._inline_field(
+            body, "Τοποθέτηση", label_for(TEXT_LAYOUT_CHOICES, draft["text_layout"]),
+            changed, TEXT_LAYOUT_CHOICES)
+        variables["text_layout"] = var
+        choice_values["text_layout"] = TEXT_LAYOUT_CHOICES
 
-        def current():
-            result = copy.deepcopy(draft)
-            for key, var in variables.items():
-                result[key] = choice_values[key][var.get()] if key in choice_values else var.get()
+        for key, label in (("text_color", "Χρώμα κειμένου"),
+                           ("panel_color", "Χρώμα πλαισίου"),
+                           ("accent_color", "Χρώμα έμφασης")):
+            self._inline_label(body, label, pady=(7, 2))
+            row = tk.Frame(body, bg=self._inline_bg(body))
+            row.pack(fill="x")
+            var = tk.StringVar(value=draft[key])
+            variables[key] = var
+            swatch = tk.Button(row, bg=draft[key], width=4, relief="flat", bd=0,
+                               highlightthickness=1, highlightbackground="#2a313d",
+                               cursor="hand2")
+            swatch.pack(side="left")
+            entry = ttk.Entry(row, textvariable=var, width=12)
+            entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
+
+            def choose(k=key, s=swatch, v=var):
+                color = colorchooser.askcolor(v.get(), parent=self.root)[1]
+                if color:
+                    v.set(color)
+                    s.configure(bg=color)
+            swatch.configure(command=choose)
+            var.trace_add("write", lambda *_a, s=swatch, v=var: (
+                s.configure(bg=v.get()) if len(v.get()) == 7 else None))
+
+        slider_specs = (
+            ("panel_opacity", "Διαφάνεια πλαισίου", 0, 100),
+            ("panel_width_pct", "Πλάτος πλαισίου (0 = Auto)", 0, 100),
+            ("panel_padding_pct", "Padding πλαισίου (0 = Auto)", 0, 15),
+            ("panel_min_height_pct", "Ελάχιστο ύψος (0 = Auto)", 0, 80),
+        )
+        slider_widgets = {}
+        for key, label, low, high in slider_specs:
+            slider_widgets[key] = self._inline_slider(
+                body, label, draft.get(key, 0), changed, low, high)
+
+        def current_style():
+            style = dict(draft)
             try:
-                result["font_size"] = int(result["font_size"])
-            except ValueError:
+                style["font_size"] = int(float(variables["font_size"].get()))
+            except (ValueError, tk.TclError):
                 status.set("Γράψε έγκυρο μέγεθος γραμματοσειράς.")
                 return None
             for key in ("text_color", "panel_color", "accent_color"):
                 try:
-                    self.root.winfo_rgb(result[key])
+                    self.root.winfo_rgb(variables[key].get())
+                    style[key] = variables[key].get()
                 except tk.TclError:
                     status.set("Γράψε έγκυρο χρώμα.")
                     return None
-            result["template"] = (saved[template.get()]["template"] if template.get() in saved
-                                    else labels.get(template.get(), "legacy"))
-            return normalize_presentation(result, scene_id=original["scene_id"])
+            for key in choice_values:
+                style[key] = choice_values[key][variables[key].get()]
+            for key, scale in slider_widgets.items():
+                style[key] = int(scale.get())
+            style["panel_style"] = ("solid" if style["panel_opacity"] >= 60
+                                    else "translucent")
+            return style
 
         def apply():
-            if not dirty["value"] or self.media_files is not media or not body.winfo_exists():
+            if not body.winfo_exists() or not dirty["value"]:
                 return False
-            result = current()
-            if result is None:
+            style = current_style()
+            if style is None:
                 return False
-            valid = [target for target in targets if any(target is entry for entry in media)]
-            if not valid:
+            template_name = template_var.get()
+            if template_name not in registry:
+                return False
+            template_entry = registry[template_name]
+            template_style_values = template_entry["style"]
+            overrides = [key for key in STYLE_FIELDS
+                         if style.get(key) != template_style_values.get(key)]
+            if project_scope and not targets:
+                status.set("Δεν υπάρχουν media για overrides. Το template project "
+                           "αλλάζει από το παραπάνω picker.")
                 return False
             self.push_undo()
-            for target in valid:
-                value = normalize_presentation(target[2].get("presentation"))
+            for target in targets:
+                current = normalize_presentation(target[2].get("presentation"))
+                current["template"] = template_entry["base"]
+                current["template_name"] = template_name
+                current["style_overrides"] = overrides
                 for key in STYLE_FIELDS:
-                    value[key] = copy.deepcopy(result[key])
-                target[2]["presentation"] = value
+                    current[key] = copy.deepcopy(style[key])
+                target[2]["presentation"] = current
             dirty["value"] = False
-            status.set("Η εμφάνιση εφαρμόστηκε.")
+            self.is_modified = True
             self._inline_refresh()
+            status.set("Η εμφάνιση εφαρμόστηκε ως override του project.")
             return True
+
         self._caption_apply_callback = apply
-        ttk.Button(body, text="Εφαρμογή εμφάνισης", command=self._commit_pending_caption_apply).pack(fill="x", pady=8)
-        status_label = self._inline_label(body)
-        status_label.configure(textvariable=status)
-        default_label = TEMPLATES.get(self.project_template, TEMPLATES["legacy"])
-        default, combo = self._inline_field(body, "Προεπιλεγμένο template project", default_label,
-                                            lambda: None, TEMPLATES.values())
-        def project_default(_event):
-            self._commit_pending_caption_apply()
-            self.project_template = next(key for key, label in TEMPLATES.items() if label == default.get())
-            self._remember_caption_template(self.project_template)
-            self._inline_refresh()
-        combo.bind("<<ComboboxSelected>>", project_default)
-        name, _entry = self._inline_field(body, "Όνομα template για αποθήκευση", "", lambda: None)
-        def save_template():
-            value = current()
-            title = name.get().strip()
-            if value is None or not title or title in labels:
-                status.set("Γράψε ένα μοναδικό όνομα template.")
-                return
-            saved[title] = {key: copy.deepcopy(value[key]) for key in DESIGN_FIELDS}
-            write_design_templates(self.settings, saved)
-            self.save_settings()
-            template_combo.configure(values=design_template_choices(saved, TEMPLATES.values(), INHERIT_TEMPLATE_LABEL))
-            status.set("Το template αποθηκεύτηκε στο προφίλ.")
-        ttk.Button(body, text="Αποθήκευση / ενημέρωση\ntemplate", command=save_template).pack(fill="x", pady=4)
-        def reset():
-            dirty["loading"] = True
-            fresh = normalize_presentation({"template": labels.get(template.get(), "legacy")},
-                                           project_template=self.project_template)
-            draft.update(saved.get(template.get(), fresh))
-            fill_variables()
-            dirty["loading"] = False
-            changed()
-        ttk.Button(body, text="Επαναφορά template", command=reset).pack(fill="x", pady=4)
+        button_row = tk.Frame(body, bg=self._inline_bg(body))
+        button_row.pack(fill="x", pady=(10, 2))
+        from .ui_widgets import primary_button
+        primary_button(button_row, "Εφαρμογή εμφάνισης",
+                       lambda: self._commit_pending_caption_apply()).pack(
+            side="left", fill="x", expand=True)
+        ttk.Button(button_row, text="Επαναφορά",
+                   command=lambda: self._reset_design_scope(scope, targets,
+                                                           project_scope)).pack(
+            side="right", padx=(6, 0))
+        self._inline_label(body)
+        body.winfo_children()[-1].configure(textvariable=status)
+
+        # A per-slide badge/logo remains useful and does not belong to templates.
+        advanced = ttk.LabelFrame(body, text="Badge / Λογότυπο", padding=5)
+        advanced.pack(fill="x", pady=(10, 2))
+        featured = tk.BooleanVar(value=bool(draft.get("featured_enabled")))
+        logo = tk.BooleanVar(value=bool(draft.get("logo_enabled")))
+        featured_text = tk.StringVar(value=str(draft.get("featured_text", "")))
+        logo_path = tk.StringVar(value=str(draft.get("logo_path", "")))
+        tk.Checkbutton(advanced, text="Εμφάνιση badge", variable=featured,
+                       indicatoron=False, bg=P["raised"], fg=P["text"],
+                       selectcolor=P["accent_faint"], activebackground=P["selected"],
+                       activeforeground=P["text"], relief="flat", bd=0, anchor="w",
+                       padx=8, pady=4, font=("Segoe UI", 8)).pack(fill="x")
+        ttk.Entry(advanced, textvariable=featured_text).pack(fill="x", pady=(2, 4))
+        tk.Checkbutton(advanced, text="Εμφάνιση λογοτύπου", variable=logo,
+                       indicatoron=False, bg=P["raised"], fg=P["text"],
+                       selectcolor=P["accent_faint"], activebackground=P["selected"],
+                       activeforeground=P["text"], relief="flat", bd=0, anchor="w",
+                       padx=8, pady=4, font=("Segoe UI", 8)).pack(fill="x")
+        path_row = tk.Frame(advanced)
+        path_row.pack(fill="x", pady=(2, 0))
+        ttk.Entry(path_row, textvariable=logo_path).pack(side="left", fill="x", expand=True)
+
+        def browse_logo():
+            path = filedialog.askopenfilename(
+                parent=self.root, filetypes=[("Logo", "*.png *.jpg *.jpeg")])
+            if path:
+                logo_path.set(path)
+        ttk.Button(path_row, text="…", width=3, command=browse_logo).pack(side="left")
+        ttk.Button(advanced, text="Εφαρμογή badge/logo",
+                   command=lambda: self._apply_design_extra(
+                       targets, featured.get(), featured_text.get(),
+                       logo.get(), logo_path.get())).pack(fill="x", pady=(4, 0))
+        dirty["loading"] = False
+
+    def _reset_design_scope(self, scope, targets, project_scope):
+        if not messagebox.askyesno(
+                "Επαναφορά",
+                "Να επαναφερθεί η εμφάνιση στο default template των ρυθμίσεων;",
+                parent=self.root):
+            return
+        if project_scope:
+            self.reset_project_template(mark_modified=False)
+            for _kind, _path, edit in self.media_files:
+                current = normalize_presentation(edit.get("presentation"))
+                current["template"] = INHERIT_TEMPLATE
+                current["template_name"] = ""
+                current["style_overrides"] = []
+                edit["presentation"] = current
+        else:
+            for target in targets:
+                current = normalize_presentation(target[2].get("presentation"))
+                current["template"] = INHERIT_TEMPLATE
+                current["template_name"] = ""
+                current["style_overrides"] = []
+                target[2]["presentation"] = current
+        self.is_modified = True
+        self._inline_refresh()
+        self._render_inspector()
+
+    def _apply_design_extra(self, targets, featured, featured_text, logo, logo_path):
+        self.push_undo()
+        for target in targets:
+            current = normalize_presentation(target[2].get("presentation"))
+            current["featured_enabled"] = bool(featured)
+            current["featured_text"] = str(featured_text or "")
+            current["logo_enabled"] = bool(logo)
+            current["logo_path"] = str(logo_path or "")
+            target[2]["presentation"] = current
+        self.is_modified = True
+        self._inline_refresh()

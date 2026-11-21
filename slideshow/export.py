@@ -205,12 +205,14 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
                                 "image", path, edit, frame=img)
                             clip_dur = float(item_duration)
                     else:
-                        img = self._fit_image_logic(img, width, height, m_type, text=text)
+                        img = self._fit_image_logic(img, width, height, m_type, text=text,
+                                                    presentation=presentation)
                         fit_move_data = getattr(img, 'fit_move_data', None)
                         if fit_move_data is None:
                             png_path = temp_dir / f"frame_{i:04d}.png"
                             img = self.render_text_on_image(
-                                img, text, width, height, align=presentation["text_align"])
+                                img, text, width, height, align=presentation["text_align"],
+                                presentation=presentation)
                             img.save(str(png_path), "PNG")
                             cmd = ['ffmpeg', '-y', '-loop', '1', '-i', str(png_path),
                                    '-t', str(item_duration), '-c:v', 'libx264',
@@ -224,7 +226,8 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
                                 lambda: self._render_fit_and_move_clip(
                                     img, fit_move_data, temp_dir, i, width, height,
                                     item_duration, clip_path,
-                                    text_align=presentation["text_align"]),
+                                    text_align=presentation["text_align"],
+                                    presentation=presentation),
                                 "image", path, edit)
                 else:
                     # Duration via ffprobe. MoviePy's VideoFileClip reads a full
@@ -268,8 +271,11 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
                     bg_p = temp_dir / f"bg_{i:04d}.png"
                     first_f = self._apply_image_edit(self._video_first_frame(path), edit, m_type="video")
                     if presentation["template"] != "legacy":
-                        auto_position_video = bool(self.settings.get("auto_position_videos", False))
-                        if auto_position_video:
+                        layout = presentation.get("text_layout")
+                        auto_position_video = (
+                            (layout == "below") if layout else
+                            bool(self.settings.get("auto_position_videos", False)))
+                        if auto_position_video and not presentation.get("text_layout"):
                             presentation = copy.deepcopy(presentation)
                             presentation["text_position"] = "bottom"
                         fields = self._presentation_fields(presentation, "video")
@@ -313,9 +319,13 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
                         text = self._presentation_text(presentation, "video")
                         txt_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
                         txt_overlay = self.render_text_on_image(
-                            txt_overlay, text, width, height, align=presentation["text_align"])
+                            txt_overlay, text, width, height,
+                            align=presentation["text_align"], presentation=presentation)
                         txt_overlay.save(str(txt_p), "PNG")
-                        auto_position_video = bool(self.settings.get("auto_position_videos", False))
+                        layout = presentation.get("text_layout")
+                        auto_position_video = (
+                            (layout == "below") if layout else
+                            bool(self.settings.get("auto_position_videos", False)))
                         if auto_position_video:
                             if self.settings.get("video_auto_position_fill", "panel") == "blur":
                                 video_background = self._create_blur_bg(first_f, width, height)
@@ -323,7 +333,7 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
                                 video_background = Image.new(
                                     "RGB", (width, height), presentation["panel_color"])
                             available_h, video_y = self._auto_video_text_layout(
-                                text, width, height)
+                                text, width, height, presentation)
                             size_part = (f"scale={width}:{available_h}:"
                                          "force_original_aspect_ratio=decrease")
                             overlay_position = f"(W-w)/2:{video_y}"

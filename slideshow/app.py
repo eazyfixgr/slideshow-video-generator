@@ -42,7 +42,11 @@ from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
 from .ui_presentation import PresentationMixin
 from .ui_captions import CaptionsMixin
 from .slide_design import normalize_template, normalize_presentation
+from .slide_templates import (DEFAULT_KEY, LABEL_FOR_BASE, ensure_template_settings,
+                              default_template_name, read_template_registry,
+                              resolve_presentation, template_base)
 from .ui_welcome import WelcomeMixin
+from .ui_slideshow_settings import SlideshowSettingsMixin
 from .ui_theme import ThemeMixin
 from .profiles import (active_profile as registry_active_profile, create_profile,
                        ensure_profile_paths, get_profile, last_project_path,
@@ -69,7 +73,7 @@ PROJECT_TRANSITIONS = {"none", "fade", "fadeblack", "fadewhite", "wipeleft", "wi
                        "wipeup", "wipedown", "smoothleft", "smoothright", "random"}
 
 
-class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, StoryboardMixin, MediaRecoveryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, ProfileDialogsMixin, WelcomeMixin, ThemeMixin, SettingsMixin, InspectorMixin, ExportPanelMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin):
+class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, StoryboardMixin, MediaRecoveryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, ProfileDialogsMixin, WelcomeMixin, ThemeMixin, SlideshowSettingsMixin, SettingsMixin, InspectorMixin, ExportPanelMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin):
     """Composes every mixin above into the one application object."""
 
     def __init__(self, root, show_welcome=True):
@@ -132,8 +136,13 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         }
 
         self.load_settings()
-        self.project_template = normalize_template(
-            self.settings.get("last_caption_template", self.project_template))
+        if ensure_template_settings(
+                self.settings, legacy_font_size=self.settings.get("font_size"),
+                legacy_font_family=self.settings.get("font_family"),
+                legacy_text_style=self.settings.get("text_style")):
+            self.save_settings()
+        self._template_registry_cache = None
+        self._init_project_template_state()
         self._global_settings = copy.deepcopy(self.settings)
         self.apply_ui_theme()
         self.view_mode.set(self.settings.get("view_mode", "thumbnails"))
@@ -293,6 +302,96 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
     def _default_output_folder(self):
         return self.profile_paths["output"]
 
+    def template_registry(self, refresh=False):
+        cache = getattr(self, "_template_registry_cache", None)
+        if refresh or cache is None:
+            cache = read_template_registry(self.settings)
+            self._template_registry_cache = cache
+        return cache
+
+    def _default_template_name(self, registry=None):
+        return default_template_name(self.settings, registry or self.template_registry())
+
+    def _init_project_template_state(self):
+        registry = self.template_registry(refresh=True)
+        name = self._default_template_name(registry)
+        self.project_template_name = name
+        self.project_template_override = False
+        self.project_template = template_base(name, registry)
+
+    def _effective_project_template_name(self, registry=None):
+        registry = registry or self.template_registry()
+        if (getattr(self, "project_template_override", False) and
+                getattr(self, "project_template_name", "") in registry):
+            return self.project_template_name
+        return self._default_template_name(registry)
+
+    def _effective_project_template(self, registry=None):
+        registry = registry or self.template_registry()
+        name = self._effective_project_template_name(registry)
+        return name, template_base(name, registry)
+
+    def set_project_template(self, name, mark_modified=True):
+        registry = self.template_registry()
+        if name not in registry:
+            return False
+        self.project_template_name = name
+        self.project_template_override = True
+        self.project_template = template_base(name, registry)
+        if mark_modified:
+            self.is_modified = True
+        self._refresh_after_template_change()
+        return True
+
+    def reset_project_template(self, mark_modified=True):
+        registry = self.template_registry(refresh=True)
+        self.project_template_override = False
+        self.project_template_name = self._default_template_name(registry)
+        self.project_template = template_base(self.project_template_name, registry)
+        if mark_modified:
+            self.is_modified = True
+        self._refresh_after_template_change()
+        return True
+
+    def set_default_template(self, name):
+        registry = self.template_registry()
+        if name not in registry:
+            return False
+        self.settings[DEFAULT_KEY] = name
+        self.settings["last_caption_template"] = template_base(name, registry)
+        self.settings["last_caption_template_is_global"] = True
+        self.save_settings()
+        self._template_registry_cache = None
+        if not getattr(self, "project_template_override", False):
+            registry = self.template_registry(refresh=True)
+            self.project_template_name = self._default_template_name(registry)
+            self.project_template = template_base(self.project_template_name, registry)
+        self._refresh_after_template_change()
+        return True
+
+    def _refresh_after_template_change(self):
+        registry = self.template_registry()
+        self.project_template_name = self._effective_project_template_name(registry)
+        self.project_template = template_base(self.project_template_name, registry)
+        self._template_registry_cache = registry
+        if hasattr(self, "media_canvas"):
+            self.update_media_display()
+        if hasattr(self, "inspector_content"):
+            self._render_inspector()
+        if hasattr(self, "preview_canvas"):
+            self._schedule_preview(80)
+        if hasattr(self, "storyboard_inner"):
+            self.render_storyboard()
+        self._refresh_header()
+
+    def _resolve_presentation_style(self, presentation):
+        registry = self.template_registry()
+        project_name = (self.project_template_name
+                        if getattr(self, "project_template_override", False) else "")
+        return resolve_presentation(
+            presentation, getattr(self, "project_template", "legacy"),
+            project_name, self._default_template_name(registry), registry)
+
     def get_active_profile(self):
         return self.active_profile_data
 
@@ -322,10 +421,15 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.project_settings = {}
         self._apply_profile_paths()
         self.load_settings()
+        if ensure_template_settings(
+                self.settings, legacy_font_size=self.settings.get("font_size"),
+                legacy_font_family=self.settings.get("font_family"),
+                legacy_text_style=self.settings.get("text_style")):
+            self.save_settings()
+        self._template_registry_cache = None
+        self._init_project_template_state()
         self._load_profile_workspace_layout()
         self._global_settings = copy.deepcopy(self.settings)
-        self.project_template = normalize_template(
-            self.settings.get("last_caption_template", "legacy"))
         self.apply_ui_theme()
         self.load_music_tracker()
         stop_play = getattr(self, "_stop_preview_play", None)
@@ -518,6 +622,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump(stored, f, indent=2)
         os.replace(temp_file, self.settings_file)
+        self._template_registry_cache = None
 
 
     def _capture_project_settings(self):
@@ -702,8 +807,10 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.name_var.set("")
         self.out_var.set(self.settings.get("output_folder", ""))
         self.media_files = []
-        self.project_template = normalize_template(
-            self.settings.get("last_caption_template", "legacy"))
+        self.project_template_override = False
+        self.project_template_name = self._default_template_name()
+        self.project_template = template_base(self.project_template_name,
+                                              self.template_registry())
         self._sync_caption_template_dropdown()
         self.project_caption_mode = "all"
         self.project_text_all = ""
@@ -780,6 +887,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
             "out": self.out_var.get(),
             "project_watermark": self.project_watermark,
             "project_template": self.project_template,
+            "project_template_name": self.project_template_name,
+            "project_template_override": bool(self.project_template_override),
             "project_settings": self._capture_project_settings(),
             "caption_mode": self.project_caption_mode,
             "caption_strategy_version": 1,
@@ -995,7 +1104,24 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
                     self.settings[key] = copy.deepcopy(self._global_settings[key])
         self._migrate_global_video_position(data.get("project_settings", {}))
         had_project_template = "project_template" in data
-        self.project_template = self._resolve_project_template_default(data)
+        registry = self.template_registry()
+        explicit = data.get("project_template_override")
+        if explicit is None:
+            explicit = (bool(data.get("project_template_name")) or
+                        had_project_template)
+        if explicit:
+            name = str(data.get("project_template_name") or "").strip()
+            if name not in registry:
+                old_base = normalize_template(data.get("project_template", "legacy"),
+                                              "legacy")
+                name = LABEL_FOR_BASE.get(old_base, self._default_template_name(registry))
+            self.project_template_name = name
+            self.project_template = template_base(name, registry)
+            self.project_template_override = True
+        else:
+            self.project_template_override = False
+            self.project_template_name = self._default_template_name(registry)
+            self.project_template = template_base(self.project_template_name, registry)
         self._sync_caption_template_dropdown()
         self.project_settings = self._normalize_project_settings(
             data.get("project_settings", {}))

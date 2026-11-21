@@ -33,15 +33,6 @@ class StoryboardMixin:
         tk.Label(header, text="Σύρε τις κάρτες για αναδιάταξη · διπλό κλικ για επεξεργασία",
                  bg=P["panel"], fg=P["muted"], font=("Segoe UI", 8)).pack(
             side="left", padx=(14, 0))
-        flat_button(header, "Slide Design", self.open_storyboard_editor,
-                    background=P["panel"], foreground=P["muted"],
-                    active_background=P["selected"], font=("Segoe UI", 8),
-                    padx=8, pady=3).pack(side="right", padx=(6, 0))
-        flat_button(header, "Captions", self.open_text_captions_manager,
-                    background=P["panel"], foreground=P["muted"],
-                    active_background=P["selected"], font=("Segoe UI", 8),
-                    padx=8, pady=3).pack(side="right")
-
         canvas = tk.Canvas(frame, bg=P["panel"], highlightthickness=0, height=120)
         canvas.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 2))
         scrollbar = SlimScrollbar(frame, command=canvas.xview, orient="horizontal",

@@ -91,6 +91,9 @@ class RenderMixin:
         presentation = normalize_presentation(value, project_template=project_template)
         if getattr(self, "project_caption_mode", None) in ("all", "by_type"):
             presentation["mode"] = "global"
+        resolver = getattr(self, "_resolve_presentation_style", None)
+        if resolver is not None:
+            return resolver(presentation)
         if presentation["template"] == "project":
             default = getattr(self, "project_template", "legacy")
             presentation["template"] = (default if isinstance(default, str) and default in TEMPLATES
@@ -132,58 +135,110 @@ class RenderMixin:
     def _render_design_frame(self, source, edit, m_type, width, height, global_text=None):
         """Render a still frame through the shared slide template engine."""
         presentation = self._presentation_for(edit)
-        auto_position_video = (m_type == "video" and
-                               self.settings.get("auto_position_videos", False))
-        if auto_position_video:
-            presentation["text_position"] = "bottom"
+        layout = presentation.get("text_layout")
+        below_media = ((layout == "below") if layout else
+                       bool(self.settings.get("auto_position_videos" if m_type == "video"
+                                              else "auto_position_photos", False)))
         fields = self._presentation_fields(presentation, m_type, global_text)
         before = self._presentation_before_image(presentation, fallback=source)
         frame, overflow = compose_design_frame(
             source, width, height, presentation, fields, before_image=before,
-            auto_position_video=auto_position_video,
+            auto_position_video=below_media,
             video_fill_mode=self.settings.get("video_auto_position_fill", "panel"))
         return frame, overflow
 
 
-    def render_text_on_image(self, img, text, w, h, align="center"):
+    def _legacy_style(self, presentation=None):
+        presentation = presentation or {}
+        family = (presentation.get("font_family") or
+                  self.settings.get("font_family", "Calibri"))
+        try:
+            size = int(presentation.get("font_size") or self.settings["font_size"])
+        except (TypeError, ValueError):
+            size = int(self.settings.get("font_size", 32) or 32)
+        opacity = presentation.get("panel_opacity")
+        if opacity is None:
+            opacity = 100 if self.settings.get("text_style") == "black_box" else 0
+        return {
+            "font_family": family, "font_size": size,
+            "text_color": presentation.get("text_color") or "#000000",
+            "panel_color": presentation.get("panel_color") or "#FFFFFF",
+            "panel_opacity": max(0, min(100, int(opacity))),
+            "panel_width_pct": max(0, min(100, int(
+                presentation.get("panel_width_pct") or 0))),
+            "panel_padding_pct": float(presentation.get("panel_padding_pct") or 0),
+            "panel_min_height_pct": int(presentation.get("panel_min_height_pct") or 0),
+            "text_align": presentation.get("text_align") or "center",
+        }
+
+    def render_text_on_image(self, img, text, w, h, align="center", presentation=None):
         if not text:
             return img
+        style = self._legacy_style(presentation)
+        align = style["text_align"] if presentation is not None else align
         img = img.copy().convert("RGBA")
         draw = ImageDraw.Draw(img)
-        fs = self.settings["font_size"]
-        font, f_bold = self._get_text_fonts(fs)
-        parts, lines = self._wrap_text_lines(text, w, fs)
-        
+        fs = style["font_size"]
+        family = style["font_family"]
+        font, f_bold = self._get_text_fonts(fs, family)
+        width_pct = style["panel_width_pct"]
+        area_w = max(1, int(w * width_pct / 100)) if 0 < width_pct < 100 else w
+        area_x = (w - area_w) // 2
+        parts, lines = self._wrap_text_lines(text, area_w, fs, family)
+
         lh = fs + 5
-        y = h - (len(lines) * lh) - 15
-        if self.settings["text_style"] == "black_box" and lines:
+        content_h = len(lines) * lh
+        y = h - content_h - 15
+        pad = max(15, int(min(w, h) * style["panel_padding_pct"] / 100))
+        min_h = int(h * style["panel_min_height_pct"] / 100)
+        if style["panel_opacity"] > 0 and lines:
             max_lw = max([l[1] for l in lines])
-            box_x = self._legacy_text_x(w, max_lw, align)
-            draw.rectangle([box_x - 15, y - 5, box_x + max_lw + 15, h - 5],
-                           fill=(255, 255, 255, 255))
+            if 0 < width_pct < 100:
+                box_x, box_w = area_x, area_w
+            else:
+                box_x = self._legacy_text_x(w, max_lw, align)
+                box_w = max_lw + 2 * pad
+            if 0 < width_pct < 100:
+                left, right = box_x, box_x + box_w
+            else:
+                left, right = box_x - pad, box_x + max_lw + pad
+            top = min(y - 5, h - max(content_h + 10, min_h) - 5)
+            panel = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            panel_draw = ImageDraw.Draw(panel)
+            panel_color = style["panel_color"].lstrip("#")
+            rgb = tuple(int(panel_color[i:i + 2], 16) for i in (0, 2, 4))
+            alpha = int(style["panel_opacity"] * 2.55)
+            panel_draw.rectangle(
+                [left, top, right, h - 5 + max(0, min_h - content_h)],
+                fill=(*rgb, alpha))
+            img = Image.alpha_composite(img, panel)
+            draw = ImageDraw.Draw(img)
         for lp, lw in lines:
-            x = self._legacy_text_x(w, lw, align)
+            x = area_x + self._legacy_text_x(area_w, lw, align)
             for is_b, txt in lp:
                 f = f_bold if is_b else font
-                draw.text((x, y), txt, font=f, fill="black")
+                draw.text((x, y), txt, font=f, fill=style["text_color"])
                 x += f.getlength(txt)
             y += lh
         return img
 
 
-    def _auto_video_text_layout(self, text, width, height):
+    def _auto_video_text_layout(self, text, width, height, presentation=None):
         """Reserve a bottom caption area so auto-positioned video stays unobscured."""
         if not (text or "").strip():
             return max(1, int(height)), 0
-        font_size = int(self.settings.get("font_size", 32))
-        _parts, lines = self._wrap_text_lines(text, width, font_size)
+        style = self._legacy_style(presentation)
+        font_size = style["font_size"]
+        _parts, lines = self._wrap_text_lines(text, width, font_size,
+                                              style["font_family"])
         text_height = len(lines) * (font_size + 5) + 40
         return max(100, int(height) - text_height), 20
 
 
     def _render_auto_position_video(self, source, presentation, text, width, height):
         """Fit the whole video above its caption and fill side gaps consistently."""
-        available_h, top = self._auto_video_text_layout(text, width, height)
+        available_h, top = self._auto_video_text_layout(text, width, height,
+                                                        presentation)
         if self.settings.get("video_auto_position_fill", "panel") == "blur":
             frame = self._create_blur_bg(source, width, height)
         else:
@@ -197,7 +252,8 @@ class RenderMixin:
         x = max(0, (width - fitted.width) // 2)
         frame.paste(fitted, (x, top))
         return self.render_text_on_image(
-            frame, text, width, height, align=presentation["text_align"])
+            frame, text, width, height, align=presentation["text_align"],
+            presentation=presentation)
 
 
     @staticmethod
@@ -209,8 +265,8 @@ class RenderMixin:
         return 15
 
 
-    def _wrap_text_lines(self, text, w, fs=None):
-        """Split text into drawable parts and wrapped lines — same layout as rendering.
+    def _wrap_text_lines(self, text, w, fs=None, family=None):
+        """Split text into drawable parts and wrapped lines - same layout as rendering.
 
         Returns (parts, lines) where parts is [(is_bold, chunk), ...] used for
         drawing and lines is [(chunk_list, line_width), ...] used both for
@@ -218,7 +274,7 @@ class RenderMixin:
         """
         if fs is None:
             fs = self.settings["font_size"]
-        font, f_bold = self._get_text_fonts(fs)
+        font, f_bold = self._get_text_fonts(fs, family)
 
         parts = []
         last = 0
@@ -258,14 +314,9 @@ class RenderMixin:
         return parts, lines
 
 
-    def _get_text_fonts(self, fs):
-        """Regular + bold ImageFont for the chosen family (Settings → Text).
-
-        Windows ships these fonts, so we look them up in the Fonts folder. A
-        missing family falls back to Calibri, then to Pillow's built-in font,
-        so rendering never breaks.
-        """
-        family = self.settings.get("font_family", "Calibri")
+    def _get_text_fonts(self, fs, family=None):
+        """Regular + bold ImageFont for the chosen family."""
+        family = family or self.settings.get("font_family", "Calibri")
         reg, bold = _TEXT_FONT_FILES.get(family, _TEXT_FONT_FILES["Calibri"])
         fonts_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
         candidates = [
@@ -309,14 +360,15 @@ class RenderMixin:
         return bg.crop((x0, y0, x0 + tw, y0 + th)).filter(ImageFilter.GaussianBlur(30))
 
 
-    def _make_text_overlay(self, text, width, height, align="center"):
-        """Precompute the text overlay (white box + text on a transparent layer)
+    def _make_text_overlay(self, text, width, height, align="center", presentation=None):
+        """Precompute the text overlay (panel + text on a transparent layer)
         once, so it can be pasted onto every frame cheaply instead of re-rendering
         the text 120 times per photo."""
         if not text:
             return None
         base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        return self.render_text_on_image(base, text, width, height, align=align)
+        return self.render_text_on_image(base, text, width, height, align=align,
+                                         presentation=presentation)
 
 
     def _render_fit_and_move_frame(self, bg, fit_move_data, pos, width, height, overlay=None):
@@ -342,7 +394,7 @@ class RenderMixin:
 
     def _render_fit_and_move_clip(self, bg, fit_move_data, temp_dir, index, width, height,
                                   image_duration, clip_path, text_align="center",
-                                  design_layers=None):
+                                  design_layers=None, presentation=None):
         """Render a slow pan clip for the 'Fit and Move' background mode.
 
         The foreground image was already zoomed in ``_fit_image_logic`` so it
@@ -361,7 +413,8 @@ class RenderMixin:
         forward = random.choice([True, False])
         if design_layers is None:
             overlay = self._make_text_overlay(self.get_text_for("image"), width, height,
-                                              align=text_align)
+                                              align=text_align,
+                                              presentation=presentation)
             design_pan_background = None
             base = fixed_overlay = rect = None
         else:
@@ -415,13 +468,19 @@ class RenderMixin:
         return float(image_duration)
 
 
-    def _fit_image_logic(self, img, tw, th, m_type, text=None):
-        img = img.convert("RGB")  # keep every downstream op (blur, resize, paste, rawvideo) in RGB
-        auto_pos = self.settings.get("auto_position_photos" if m_type == "image" else "auto_position_videos", False)
+    def _fit_image_logic(self, img, tw, th, m_type, text=None, presentation=None):
+        img = img.convert("RGB")  # keep every downstream op (blur, resize, paste, rawvideo) 
+        style = self._legacy_style(presentation)
+        layout = (presentation or {}).get("text_layout")
+        auto_pos = ((layout == "below") if layout else
+                    self.settings.get("auto_position_photos" if m_type == "image"
+                                      else "auto_position_videos", False))
         iw, ih = img.size
-        lh = self.settings["font_size"] + 5
+        lh = style["font_size"] + 5
         text_here = self.get_text_for(m_type) if text is None else text
-        _, wrapped_lines = self._wrap_text_lines(text_here, tw) if text_here.strip() else ([], [])
+        _, wrapped_lines = (self._wrap_text_lines(text_here, tw, style["font_size"],
+                                                  style["font_family"])
+                            if text_here.strip() else ([], []))
         
         bg_m = self.settings["background_mode"]
         if bg_m in ("blur", "fit_and_move"):

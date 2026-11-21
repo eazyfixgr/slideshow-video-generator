@@ -841,7 +841,8 @@ class WelcomeMixin:
         folder_var = tk.StringVar(value=(self.out_var.get().strip() or
                                          self.settings.get("output_folder", str(self.app_dir))))
         resolution_var = tk.StringVar(value=self.settings.get("resolution", "1080x1080"))
-        current_template = TEMPLATES.get(self.project_template, TEMPLATES["legacy"])
+        template_names = list(self.template_registry())
+        current_template = self._effective_project_template_name()
         template_var = tk.StringVar(value=current_template)
         background_var = tk.StringVar(value=next(
             (label for label, value in BACKGROUND_LABELS.items()
@@ -889,7 +890,7 @@ class WelcomeMixin:
         ttk.Combobox(p2, textvariable=resolution_var, values=RESOLUTIONS,
                      state="readonly").pack(fill="x")
         ttk.Label(p2, text="Προεπιλεγμένο template project").pack(anchor="w", pady=(14, 3))
-        ttk.Combobox(p2, textvariable=template_var, values=list(TEMPLATES.values()),
+        ttk.Combobox(p2, textvariable=template_var, values=template_names,
                      state="readonly").pack(fill="x")
         ttk.Label(p2, text="Τα slides με «Use Project Default» κληρονομούν αυτό το template· "
                           "κάθε slide μπορεί να έχει δικό του override.",
@@ -968,9 +969,13 @@ class WelcomeMixin:
             self.new_project()
             self.name_var.set(name)
             self.out_var.set(folder)
-            self.project_template = next(
-                (key for key, label in TEMPLATES.items() if label == template_var.get()), "legacy")
-            self._remember_caption_template(self.project_template)
+            chosen_template = template_var.get()
+            if not self.set_project_template(chosen_template, mark_modified=False):
+                self.project_template = next(
+                    (key for key, label in TEMPLATES.items()
+                     if label == chosen_template), "legacy")
+                self.project_template_name = chosen_template
+                self.project_template_override = True
             self.settings.update({
                 "output_folder": folder,
                 "resolution": resolution_var.get(),

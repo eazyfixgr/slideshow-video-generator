@@ -23,8 +23,7 @@ TRANSITIONS = {
     "Smooth right": "smoothright",
 }
 TRANSITION_BY_VALUE = {value: label for label, value in TRANSITIONS.items()}
-INSPECTOR_TABS = (("captions", "Captions"), ("story", "Storyboard"),
-                  ("design", "Slide Design"))
+INSPECTOR_TABS = (("captions", "Captions"), ("design", "Slide Design"))
 
 
 class InspectorMixin(InlineEditorsMixin):
@@ -88,10 +87,8 @@ class InspectorMixin(InlineEditorsMixin):
         body.pack(fill="both", expand=True)
         if view == "captions":
             self._render_captions_inspector(body)
-        elif view == "design":
-            self._render_design_inspector(body)
         else:
-            self._render_story_inspector(body)
+            self._render_design_inspector(body)
 
     def _selected_item_index(self):
         selected = sorted(getattr(self, "selected_indices", set()))
@@ -258,6 +255,121 @@ class InspectorMixin(InlineEditorsMixin):
                     lambda: self.delete_media(index), background=P["raised"],
                     foreground=P["danger"], active_background=P["selected"]).pack(
             fill="x", pady=2)
+
+    def _render_slide_project_controls(self, body):
+        """Scene timing and project defaults, moved here from the old Storyboard tab."""
+        index, item = self._selected_item()
+        if item is not None:
+            _path, kind, edit = item[1], item[0], item[2]
+            presentation = normalize_presentation(edit.get("presentation"))
+            self._section(body, f"ΣΚΗΝΗ {index + 1:02d}")
+            duration_row = tk.Frame(body, bg=P["panel"])
+            duration_row.pack(fill="x")
+            current_duration = presentation.get("duration")
+            duration_var = tk.StringVar(value=("" if current_duration is None
+                                               else f"{float(current_duration):g}"))
+            ttk.Spinbox(duration_row, from_=0.5, to=60, increment=0.5, width=9,
+                        textvariable=duration_var).pack(side="left")
+            tk.Label(duration_row, text="δευτ. (κενό = project)",
+                     bg=P["panel"], fg=P["muted"], font=("Segoe UI", 8)).pack(
+                side="left", padx=(8, 0))
+
+            def apply_duration():
+                value = duration_var.get().strip()
+                try:
+                    seconds = None if not value else max(0.2, min(600.0, float(value)))
+                except ValueError:
+                    return
+                self.push_undo()
+                data = normalize_presentation(edit.get("presentation"))
+                data["duration"] = seconds
+                edit["presentation"] = data
+                self.is_modified = True
+                self._after_scene_edit()
+
+            flat_button(duration_row, "OK", apply_duration, background=P["panel"],
+                        foreground=P["accent"], active_background=P["selected"],
+                        font=("Segoe UI", 8, "bold"), padx=6, pady=2).pack(
+                side="left", padx=(8, 0))
+
+            transition_var = tk.StringVar(value=TRANSITION_BY_VALUE.get(
+                presentation.get("transition", "global"), "Από το project"))
+            transition_combo = ttk.Combobox(
+                body, textvariable=transition_var, values=list(TRANSITIONS),
+                state="readonly")
+            transition_combo.pack(fill="x", pady=(4, 0))
+            transition_duration = tk.StringVar(
+                value="" if presentation.get("transition_duration") is None
+                else f"{float(presentation['transition_duration']):g}")
+            tr_row = tk.Frame(body, bg=P["panel"])
+            tr_row.pack(fill="x", pady=(5, 0))
+            tk.Label(tr_row, text="Διάρκεια", bg=P["panel"], fg=P["muted"],
+                     font=("Segoe UI", 8)).pack(side="left")
+            ttk.Spinbox(tr_row, from_=0.2, to=2.0, increment=0.1, width=7,
+                        textvariable=transition_duration).pack(side="left", padx=(6, 0))
+            tk.Label(tr_row, text="δευτ. (κενό = project)", bg=P["panel"],
+                     fg=P["muted"], font=("Segoe UI", 8)).pack(side="left", padx=(6, 0))
+
+            def apply_transition(*_event):
+                self.push_undo()
+                data = normalize_presentation(edit.get("presentation"))
+                data["transition"] = TRANSITIONS.get(transition_var.get(), "global")
+                raw = transition_duration.get().strip()
+                try:
+                    data["transition_duration"] = (None if not raw else
+                                                    max(0.2, min(2.0, float(raw))))
+                except ValueError:
+                    data["transition_duration"] = None
+                edit["presentation"] = data
+                self.is_modified = True
+                self._after_scene_edit()
+
+            transition_combo.bind("<<ComboboxSelected>>", apply_transition, add="+")
+
+        self._section(body, "ΜΟΡΦΗ PROJECT")
+        resolution_var = tk.StringVar(value=aspect_label(self.settings.get("resolution")))
+        aspect_combo = ttk.Combobox(body, textvariable=resolution_var,
+                                    values=("9:16", "4:5", "1:1", "16:9"),
+                                    state="readonly")
+        aspect_combo.pack(fill="x")
+
+        def apply_resolution(_event=None):
+            resolution = resolution_for_aspect(resolution_var.get())
+            if resolution == self.settings.get("resolution"):
+                return
+            self.settings["resolution"] = resolution
+            self.is_modified = True
+            self.save_settings()
+            self._refresh_stage()
+            self._schedule_preview(150)
+            self.render_storyboard()
+
+        aspect_combo.bind("<<ComboboxSelected>>", apply_resolution)
+        project_duration = tk.StringVar(value=str(self.settings.get("slide_duration", 3)))
+        project_row = tk.Frame(body, bg=P["panel"])
+        project_row.pack(fill="x", pady=(6, 0))
+        tk.Label(project_row, text="Προεπιλογή διάρκειας", bg=P["panel"],
+                 fg=P["muted"], font=("Segoe UI", 8)).pack(side="left")
+        ttk.Spinbox(project_row, from_=1, to=60, increment=1, width=6,
+                    textvariable=project_duration).pack(side="left", padx=(6, 0))
+
+        def apply_project_duration():
+            try:
+                value = max(1, min(60, int(float(project_duration.get()))))
+            except ValueError:
+                return
+            self.settings["slide_duration"] = value
+            self.is_modified = True
+            self.save_settings()
+            self._schedule_preview(150)
+            self.render_storyboard()
+
+        project_row.winfo_children()[1].bind(
+            "<Return>", lambda _e: apply_project_duration())
+        if item is not None:
+            flat_button(body, "Διαγραφή σκηνής", lambda: self.delete_media(index),
+                        background=P["raised"], foreground=P["danger"],
+                        active_background=P["selected"]).pack(fill="x", pady=(8, 2))
 
     def _after_scene_edit(self):
         self._schedule_preview(120)

@@ -40,9 +40,6 @@ class SettingsMixin:
         file_menu.add_separator()
         file_menu.add_command(label="Load Project", command=self.load_project)
         file_menu.add_command(label="Save Project", command=self.save_project)
-        file_menu.add_command(label="Captions...", command=self.open_text_captions_manager)
-        file_menu.add_command(label="Slide Design / Project Templates...",
-                              command=self.open_storyboard_editor)
         file_menu.add_separator()
         file_menu.add_command(label="Νέο προφίλ...", command=self.open_new_profile_dialog)
         file_menu.add_command(label="Επεξεργασία ενεργού προφίλ...",
@@ -52,10 +49,10 @@ class SettingsMixin:
         
         settings_menu = tk.Menu(menubar, **menu_style)
         menubar.add_cascade(label="Settings", menu=settings_menu)
+        settings_menu.add_command(label="Slideshow Settings", command=self.show_slideshow_settings)
         settings_menu.add_command(label="Audio & Music Settings", command=self.show_audio_settings)
         settings_menu.add_command(label="Video Settings", command=self.show_video_settings)
         settings_menu.add_command(label="Photo Settings", command=self.show_photo_settings)
-        settings_menu.add_command(label="Text Settings", command=self.show_text_settings)
         settings_menu.add_command(label="AI (Βελτίωση κειμένου — DeepSeek/Τοπικό)", command=self.show_ai_settings)
         settings_menu.add_command(label="Σβήσιμο αντικειμένων (μοντέλο AI)", command=self.show_erase_settings)
         settings_menu.add_command(label="Watermark / Logo Settings", command=self.show_watermark_settings)
@@ -435,33 +432,6 @@ class SettingsMixin:
             self.update_media_display()
             dialog.destroy()
         ttk.Button(row, text="Save Settings", command=save).pack(side='left', padx=5)
-
-
-    def show_text_settings(self):
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Text Settings")
-        dialog.geometry("460x420")
-        dialog.minsize(380, 300)
-        dialog.resizable(True, True)
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        body, bottom = self._scrollable(dialog, 360)
-        
-        size_var = tk.IntVar(value=self.settings["font_size"])
-        ttk.Label(body, text="Font Size:").pack(padx=20, pady=(15,5), anchor='w')
-        ttk.Spinbox(body, from_=10, to=150, textvariable=size_var).pack(padx=40, anchor='w')
-        
-        fam_var = tk.StringVar(value=self.settings["font_family"])
-        ttk.Label(body, text="Font Family:").pack(padx=20, pady=(15,5), anchor='w')
-        ttk.Combobox(body, textvariable=fam_var, values=["Calibri", "Arial", "Verdana", "Georgia"]).pack(padx=40, anchor='w', fill='x')
-        
-        def save():
-            self.settings.update({"font_size": size_var.get(), "font_family": fam_var.get()})
-            self.save_settings()
-            self._schedule_preview()
-            dialog.destroy()
-        ttk.Button(bottom, text="Save Settings", command=save).pack(side='right')
 
 
     def _build_watermark_ui(self, parent, wm_data):
