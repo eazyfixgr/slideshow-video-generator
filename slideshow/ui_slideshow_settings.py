@@ -376,6 +376,11 @@ class SlideshowSettingsMixin:
         color_field("text_color", "Χρώμα κειμένου")
         color_field("panel_color", "Χρώμα πλαισίου")
         color_field("accent_color", "Χρώμα έμφασης")
+        tk.Label(editor, text="Στα captions: επίλεξε λέξεις και πάτα A, "
+                               "ή γράψε ##κείμενο##.",
+                 bg=P["background"], fg=P["muted"], font=("Segoe UI", 8),
+                 anchor="w", justify="left", wraplength=300).pack(
+            anchor="w", pady=(0, 6))
         slider_field("panel_opacity", "Διαφάνεια πλαισίου (0 = συμπαγές)",
                      0, 100, invert=True)
         slider_field("panel_width_pct", "Πλάτος πλαισίου (0 = Auto)", 0, 100)

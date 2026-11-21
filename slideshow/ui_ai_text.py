@@ -23,8 +23,8 @@ DEEPSEEK_MODELS = ["deepseek-chat", "deepseek-reasoner"]
 LOCAL_BASE_URL = "http://localhost:11434/v1"
 LOCAL_MODELS = ["llama3.1", "qwen2.5", "gemma2", "mistral", "phi3"]
 
-# The app renders **bold** out of the box, and every newline becomes its own
-# line in the video, so the model is told to respect both.
+# The app renders rich caption markup out of the box, and every newline becomes
+# its own line in the video, so the model is told to respect both.
 SYSTEM_PROMPT = (
     "Είσαι επαγγελματίας copywriter. Παίρνεις ένα κείμενο και το ξαναγράφεις καλύτερα, "
     "χωρίς να αλλάξεις το νόημα, τα γεγονότα ή τα στοιχεία επικοινωνίας.\n"
@@ -33,8 +33,12 @@ SYSTEM_PROMPT = (
     "- Κράτα την ίδια γλώσσα με το αρχικό κείμενο.\n"
     "- Κράτα τις αλλαγές γραμμής: κάθε γραμμή του αρχικού κειμένου εμφανίζεται σε ξεχωριστή "
     "γραμμή στο βίντεο.\n"
-    "- Για έμφαση χρησιμοποίησε **έντονα** (διπλά αστεράκια). Μην χρησιμοποιείς άλλα σύμβολα "
-    "markdown, ούτε emoji, hashtags ή συνδέσμους αν δεν σου ζητηθεί ρητά.\n"
+    "- Μπορείς να χρησιμοποιήσεις μόνο αυτό το markup μέσα στο κείμενο:\n"
+    "  **κείμενο** για έντονα,\n"
+    "  ##κείμενο## για το χρώμα έμφασης του template,\n"
+    "  %+1%κείμενο%% ή %-1%κείμενο%% για λίγο μεγαλύτερο/μικρότερο κείμενο. "
+    "Χρησιμοποίησε +2/-2 μόνο για έντονη διαφορά. Μην αφήνεις μοναχά σύμβολα.\n"
+    "- Μην χρησιμοποιείς άλλο markdown, emoji, hashtags ή συνδέσμους αν δεν σου ζητηθεί ρητά.\n"
     "- Μην προσθέτεις πληροφορίες που δεν υπάρχουν στο αρχικό κείμενο (τιμές, τηλέφωνα, "
     "διευθύνσεις, ονόματα)."
 )
@@ -336,7 +340,8 @@ class AITextMixin:
 
         ttk.Label(body, foreground="#777", wraplength=610, justify='left',
                   text='Παράδειγμα: «Γράψε ζεστά και σύντομα, σε πρώτο πληθυντικό. Ξεκίνα με ένα '
-                       'δυνατό **έντονο** σημείο. Μέγιστο 4 γραμμές, χωρίς emoji.»'
+                       'δυνατό **έντονο** σημείο. Μπορείς να χρησιμοποιήσεις ##χρώμα έμφασης## '
+                       'και %+1%μεγαλύτερο%% κείμενο. Μέγιστο 4 γραμμές, χωρίς emoji.»'
                   ).pack(padx=20, anchor='w', pady=(0, 6))
 
         status_lbl = ttk.Label(body, text="", wraplength=610, justify='left')

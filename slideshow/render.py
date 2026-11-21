@@ -18,6 +18,9 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 from .deps import (Image, ImageTk, ImageOps, ImageFilter, ImageDraw, ImageFont,
                    ImageEnhance, VideoFileClip, AudioFileClip, concatenate_audioclips,
                    np, DND_FILES, TkinterDnD, TKDND_AVAILABLE)
+from .rich_text import line_height as rich_line_height
+from .rich_text import line_width as rich_line_width
+from .rich_text import wrap_spans
 from .slide_design import (compose_design_frame, legacy_text, normalize_presentation,
                            presentation_fields, TEMPLATES)
 
@@ -164,6 +167,7 @@ class RenderMixin:
             "font_family": family, "font_size": size,
             "text_color": presentation.get("text_color") or "#000000",
             "panel_color": presentation.get("panel_color") or "#FFFFFF",
+            "accent_color": presentation.get("accent_color") or "#D6B86A",
             "panel_opacity": max(0, min(100, int(opacity))),
             "panel_width_pct": max(0, min(100, int(
                 presentation.get("panel_width_pct") or 0))),
@@ -181,19 +185,21 @@ class RenderMixin:
         draw = ImageDraw.Draw(img)
         fs = style["font_size"]
         family = style["font_family"]
-        font, f_bold = self._get_text_fonts(fs, family)
+        font, _f_bold = self._get_text_fonts(fs, family)
         width_pct = style["panel_width_pct"]
         area_w = max(1, int(w * width_pct / 100)) if 0 < width_pct < 100 else w
         area_x = (w - area_w) // 2
-        parts, lines = self._wrap_text_lines(text, area_w, fs, family)
+        _parts, lines = self._wrap_text_lines(text, area_w, fs, family)
 
         lh = fs + 5
-        content_h = len(lines) * lh
+        line_heights = [rich_line_height(line, lh) for line in lines]
+        content_h = sum(line_heights)
         y = h - content_h - 15
         pad = max(15, int(min(w, h) * style["panel_padding_pct"] / 100))
         min_h = int(h * style["panel_min_height_pct"] / 100)
         if style["panel_opacity"] > 0 and lines:
-            max_lw = max([l[1] for l in lines])
+            max_lw = max((int(rich_line_width(line, font)) for line in lines),
+                         default=0)
             if 0 < width_pct < 100:
                 box_x, box_w = area_x, area_w
             else:
@@ -214,13 +220,19 @@ class RenderMixin:
                 fill=(*rgb, alpha))
             img = Image.alpha_composite(img, panel)
             draw = ImageDraw.Draw(img)
-        for lp, lw in lines:
-            x = area_x + self._legacy_text_x(area_w, lw, align)
-            for is_b, txt in lp:
-                f = f_bold if is_b else font
-                draw.text((x, y), txt, font=f, fill=style["text_color"])
-                x += f.getlength(txt)
-            y += lh
+        for line, line_h in zip(lines, line_heights):
+            line_w = int(rich_line_width(line, font))
+            x = area_x + self._legacy_text_x(area_w, line_w, align)
+            for segment in line:
+                if len(segment) == 2:
+                    txt, seg_font = segment
+                    is_accent = False
+                else:
+                    txt, seg_font, is_accent = segment
+                color = style["accent_color"] if is_accent else style["text_color"]
+                draw.text((x, y), txt, font=seg_font, fill=color)
+                x += seg_font.getlength(txt)
+            y += line_h
         return img
 
 
@@ -232,7 +244,8 @@ class RenderMixin:
         font_size = style["font_size"]
         _parts, lines = self._wrap_text_lines(text, width, font_size,
                                               style["font_family"])
-        text_height = len(lines) * (font_size + 5) + 40
+        text_height = sum(rich_line_height(line, font_size + 5)
+                          for line in lines) + 40
         return max(100, int(height) - text_height), 20
 
 
@@ -267,52 +280,24 @@ class RenderMixin:
 
 
     def _wrap_text_lines(self, text, w, fs=None, family=None):
-        """Split text into drawable parts and wrapped lines - same layout as rendering.
+        """Split rich text into drawable wrapped lines - same layout as rendering.
 
-        Returns (parts, lines) where parts is [(is_bold, chunk), ...] used for
-        drawing and lines is [(chunk_list, line_width), ...] used both for
-        drawing and for estimating how much vertical space the text occupies.
+        Returns (None, lines) where each line is [(text, font, is_accent), ...]
+        so drawing and vertical-space estimates share the rich spans.
         """
         if fs is None:
             fs = self.settings.get("font_size", 32)
-        font, f_bold = self._get_text_fonts(fs, family)
+        if family is None:
+            family = self.settings.get("font_family", "Calibri")
+        base_font, _bold = self._get_text_fonts(fs, family)
 
-        parts = []
-        last = 0
-        for m in re.finditer(r'\*\*\s*([\s\S]*?)\s*\*\*', text):
-            if m.start() > last:
-                parts.append((False, text[last:m.start()]))
-            parts.append((True, m.group(1)))
-            last = m.end()
-        if last < len(text):
-            parts.append((False, text[last:]))
+        def font_factory(family_name, size, bold):
+            regular, bold_font = self._get_text_fonts(size, family_name)
+            return bold_font if bold else regular
 
-        lines = []
-        cur_line = []
-        cur_w = 0
-        for is_b, txt in parts:
-            f = f_bold if is_b else font
-            paragraphs = txt.split('\n')
-            for idx, p in enumerate(paragraphs):
-                for word in p.split():
-                    ww = f.getlength(word + " ")
-                    if cur_w + ww > w - 60 and cur_line:
-                        lines.append((cur_line, cur_w))
-                        cur_line = []
-                        cur_w = 0
-                    cur_line.append((is_b, word + " "))
-                    cur_w += ww
-                # Flush only on actual newline (not at the end of the last paragraph)
-                if idx < len(paragraphs) - 1:
-                    if cur_line:
-                        lines.append((cur_line, cur_w))
-                        cur_line = []
-                        cur_w = 0
-        if cur_line:
-            lines.append((cur_line, cur_w))
-            cur_line = []
-            cur_w = 0
-        return parts, lines
+        lines = wrap_spans(text, base_font, family, max(1, w - 60),
+                           font_factory)
+        return [], lines
 
 
     def _get_text_fonts(self, fs, family=None):
@@ -493,7 +478,8 @@ class RenderMixin:
             # Fit the image in the area above the text, zoom in a bit, and attach
             # pan data so the export can animate a slow pan across the rest of the
             # photo. Auto-position is effectively implied (image sits above text).
-            text_h = (len(wrapped_lines) * lh + 40) if wrapped_lines else 0
+            text_h = (sum(rich_line_height(line, lh) for line in wrapped_lines) + 40
+                      if wrapped_lines else 0)
             available_h = max(th - text_h, 100)
             is_landscape = (iw / ih) >= (tw / available_h)
             zoom = min(1.6, max(1.25, 1.25 * th / available_h))
@@ -508,7 +494,7 @@ class RenderMixin:
             bg.paste(fg.crop((crop_x, crop_y, crop_x + tw, crop_y + available_h)), (0, 0))
             return bg
         elif auto_pos:
-            av_h = th - (len(wrapped_lines) * lh + 40)
+            av_h = th - (sum(rich_line_height(line, lh) for line in wrapped_lines) + 40)
             r = min(tw/iw, max(100, av_h)/ih)
             fg = img.resize((int(iw*r), int(ih*r)), Image.Resampling.LANCZOS)
             y = 20

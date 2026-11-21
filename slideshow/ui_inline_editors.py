@@ -107,20 +107,36 @@ class InlineEditorsMixin(CaptionInspectorMixin):
     def _inline_bg(_widget):
         return "#171b22"
 
-    def _inline_text(self, parent, label, value, changed, height=3):
+    def _inline_text(self, parent, label, value, changed, height=3, rich=False,
+                     accent_color=None):
         self._inline_label(parent, label, pady=(7, 2))
-        widget = tk.Text(parent, height=height, width=18, wrap="word", undo=True)
+        widget = tk.Text(parent, height=height, width=18, wrap="word", undo=True,
+                         font=("Segoe UI", 10))
         widget.pack(fill="x")
         widget.insert("1.0", value)
         widget.edit_reset()
-        self._bind_captions_text(widget, changed)
+        callback = changed
+        if rich:
+            widget._rich_accent = accent_color or "#e8bd79"
+            self._setup_rich_text(widget, widget._rich_accent)
+
+            def rich_changed():
+                if changed:
+                    changed()
+                self._refresh_rich_tags(widget)
+            callback = rich_changed
+        self._bind_captions_text(widget, callback)
         widget.bind("<<Modified>>", lambda _e: modified(), add="+")
 
         def modified():
             if widget.edit_modified():
                 widget.edit_modified(False)
-                changed()
+                if callback:
+                    callback()
         widget.edit_modified(False)
+        widget._inline_on_change = callback
+        if rich:
+            self._refresh_rich_tags(widget)
         return widget
 
     def _inline_scope(self, body, values, attribute, fallback):

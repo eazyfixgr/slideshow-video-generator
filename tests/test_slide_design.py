@@ -167,8 +167,15 @@ class PresentationModelTests(unittest.TestCase):
         lines = _wrap_rich("Κανονικό **έντονο κείμενο**\nΤελευταία γραμμή",
                            _font("Calibri", 18), "Calibri", 260)
         segments = [segment for line in lines for segment in line]
-        self.assertTrue(any(is_bold for is_bold, _text in segments))
-        self.assertNotIn("**", "".join(text for _is_bold, text in segments))
+
+        def is_bold(font):
+            try:
+                return "bold" in font.getname()[1].lower()
+            except Exception:
+                return False
+
+        self.assertTrue(any(is_bold(segment[1]) for segment in segments))
+        self.assertNotIn("**", "".join(segment[0] for segment in segments))
         self.assertGreaterEqual(len(lines), 2)
 
     def test_audio_offsets_match_mixed_transition_overlaps(self):
