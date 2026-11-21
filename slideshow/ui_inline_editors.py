@@ -184,7 +184,9 @@ class InlineEditorsMixin(CaptionInspectorMixin):
 
         self._inline_label(
             body, "Οι αλλαγές εδώ είναι overrides του project. Για μόνιμες αλλαγές "
-                  "template: Settings → Slideshow Settings.", pady=(10, 2))
+                  "template: Settings → Slideshow Settings. Το Reset γυρίζει το project "
+                  "στο default των ρυθμίσεων· για σκηνή/ομάδα στο template του project.",
+            pady=(10, 2))
 
         def template_changed(_event=None):
             name = template_var.get()
