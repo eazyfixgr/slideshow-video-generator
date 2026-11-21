@@ -13,8 +13,8 @@ from datetime import datetime
 from pathlib import Path
 
 REGISTRY_NAME = "profiles.json"
-DEFAULT_PROFILE_NAME = "Ρίτα Σαμοθράκη"
-DEFAULT_PROFILE_ROLE = "Μεσιτικό γραφείο"
+DEFAULT_PROFILE_NAME = "Προεπιλογή"
+DEFAULT_PROFILE_ROLE = ""
 DEFAULT_PROFILE_COLOR = "#e8bd79"
 PROFILE_COLORS = ("#e8bd79", "#84c5a5", "#8fb8e8", "#d59ce0", "#e89a8f", "#b8c18a")
 

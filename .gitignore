@@ -21,6 +21,7 @@ ffmpeg/
 install_log.txt
 crash.log
 logo.jpg
+*.json.tmp
 
 # Build output
 release/
