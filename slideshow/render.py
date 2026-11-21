@@ -454,6 +454,13 @@ class RenderMixin:
         return float(image_duration)
 
 
+    def _slide_background_mode(self, presentation=None):
+        """Per-slide background override, else the project setting."""
+        value = (presentation or {}).get("background_mode")
+        if value in ("white", "black", "blur", "fit_and_move"):
+            return value
+        return self.settings.get("background_mode", "blur")
+
     def _fit_image_logic(self, img, tw, th, m_type, text=None, presentation=None):
         img = img.convert("RGB")  # keep every downstream op (blur, resize, paste, rawvideo) 
         style = self._legacy_style(presentation)
@@ -468,7 +475,7 @@ class RenderMixin:
                                                   style["font_family"])
                             if text_here.strip() else ([], []))
         
-        bg_m = self.settings["background_mode"]
+        bg_m = self._slide_background_mode(presentation)
         if bg_m in ("blur", "fit_and_move"):
             bg = self._create_blur_bg(img, tw, th)
         else:

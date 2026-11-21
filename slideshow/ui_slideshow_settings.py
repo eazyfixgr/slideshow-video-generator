@@ -18,7 +18,7 @@ TRANSITIONS = {
     "Fade": "fade", "Καμία": "none", "Fade to black": "fadeblack",
     "Fade to white": "fadewhite", "Wipe left": "wipeleft",
     "Wipe right": "wiperight", "Smooth left": "smoothleft",
-    "Smooth right": "smoothright",
+    "Smooth right": "smoothright", "Random": "random",
 }
 BACKGROUNDS = {"Θολό": "blur", "Λευκό": "white", "Μαύρο": "black",
                "Fit and Move": "fit_and_move"}
@@ -158,7 +158,7 @@ class SlideshowSettingsMixin:
         tk.Label(preview_box, text="ΠΡΟΕΠΙΣΚΟΠΗΣΗ", bg=P["panel"], fg=P["muted"],
                  font=("Segoe UI", 8, "bold")).grid(row=0, column=0, sticky="w",
                                                     padx=10, pady=(7, 0))
-        canvas = tk.Canvas(preview_box, bg=P["stage"], height=320,
+        canvas = tk.Canvas(preview_box, bg=P["stage"], height=480,
                            highlightthickness=0, bd=0)
         canvas.grid(row=1, column=0, sticky="ew", padx=10, pady=(4, 10))
         state["preview_canvas"] = canvas

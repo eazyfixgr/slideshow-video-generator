@@ -349,7 +349,7 @@ class CaptionInspectorMixin:
                 note = "Επίλεξε σκηνή ή Ctrl/Shift + κλικ για ομάδα."
             self._inline_label(body, note, pady=(7, 2))
             widget = self._inline_text(body, "Κείμενο", texts[0],
-                                       lambda: changed("description"), 7,
+                                       lambda: changed("description"), 14,
                                        rich=True, accent_color=accent_color)
             fields["description"] = widget
             widgets["description"] = widget
@@ -359,7 +359,7 @@ class CaptionInspectorMixin:
                 ("project_text_videos", "Κείμενο βίντεο"))
             for key, label in shared:
                 widget = self._inline_text(body, label, getattr(self, key, ""),
-                                           lambda k=key: changed(k), 7 if strategy == "all" else 5,
+                                           lambda k=key: changed(k), 14 if strategy == "all" else 10,
                                            rich=True, accent_color=accent_color)
                 fields[key], widgets[key] = widget, widget
 

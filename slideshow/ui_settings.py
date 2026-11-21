@@ -286,16 +286,19 @@ class SettingsMixin:
 
         current_effect = self.settings.get("transition_effect", "fade")
         is_random = current_effect == "random"
-        current_label = next((lbl for lbl, val in TRANSITION_EFFECTS if val == current_effect), "Fade")
+        last_effect_label = next((lbl for lbl, val in TRANSITION_EFFECTS
+                                  if val != "random" and val == current_effect), "Fade")
+        current_label = "Random" if is_random else last_effect_label
 
         tr_f = ttk.Frame(tab_slides)
         tr_f.pack(fill='x', padx=30, pady=5)
         ttk.Label(tr_f, text="Effect:").pack(side='left')
         tr_effect_var = tk.StringVar(value=current_label)
         tr_combo = ttk.Combobox(tr_f, textvariable=tr_effect_var,
-                                values=[lbl for lbl, _ in TRANSITION_EFFECTS],
+                                values=[lbl for lbl, _ in TRANSITION_EFFECTS] + ["Random"],
                                 state='disabled' if is_random else 'readonly', width=18)
         tr_combo.pack(side='left', padx=10)
+        last_effect_choice = {"label": last_effect_label}
 
         td_f = ttk.Frame(tab_slides)
         td_f.pack(fill='x', padx=30, pady=5)
@@ -323,9 +326,11 @@ class SettingsMixin:
 
         def toggle_random():
             if random_var.get():
+                tr_effect_var.set("Random")
                 tr_combo.config(state='disabled')
                 random_sub_frame.pack(fill='x', pady=(5, 0))
             else:
+                tr_effect_var.set(last_effect_choice["label"])
                 tr_combo.config(state='readonly')
                 random_sub_frame.pack_forget()
 
@@ -333,6 +338,14 @@ class SettingsMixin:
 
         if is_random:
             random_sub_frame.pack(fill='x', pady=(5, 0))
+
+        def choose_effect(_event=None):
+            if tr_effect_var.get() == "Random":
+                random_var.set(True)
+                toggle_random()
+            else:
+                last_effect_choice["label"] = tr_effect_var.get()
+        tr_combo.bind("<<ComboboxSelected>>", choose_effect)
 
         # ------------------------------------------------ Φως & Κορεσμός
         tab_color = ttk.Frame(nb)

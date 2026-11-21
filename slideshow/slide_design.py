@@ -79,6 +79,7 @@ DEFAULT_PRESENTATION = {
     "panel_width_pct": 0,
     "panel_padding_pct": 0,
     "panel_min_height_pct": 0,
+    "background_mode": None,
     "text_layout": None,
     "featured_enabled": False,
     "featured_text": "FEATURED",
@@ -104,6 +105,7 @@ _TEXT_ALIGNMENTS = {"left", "center", "right"}
 _PANEL_STYLES = {"solid", "translucent"}
 _TRANSITIONS = {"global", "none", "fade", "fadeblack", "fadewhite", "wipeleft",
                 "wiperight", "wipeup", "wipedown", "smoothleft", "smoothright"}
+_BACKGROUND_MODES = {"white", "black", "blur", "fit_and_move"}
 
 
 def normalize_presentation(value=None, scene_id=None, project_template=None):
@@ -182,6 +184,8 @@ def normalize_presentation(value=None, scene_id=None, project_template=None):
         data["panel_min_height_pct"] = 0
     if data.get("text_layout") not in ("overlay", "below"):
         data["text_layout"] = None
+    if data.get("background_mode") not in _BACKGROUND_MODES:
+        data["background_mode"] = None
     try:
         duration = float(data.get("duration")) if data.get("duration") is not None else None
     except (TypeError, ValueError):
@@ -210,7 +214,8 @@ def has_presentation_settings(value, project_template="legacy"):
                 data.get("template_name") or data.get("style_overrides") or
                 data["duration"] is not None or data["logo_enabled"] or
                 data["compare_path"] or data["transition"] != "global" or
-                data["transition_duration"] is not None)
+                data["transition_duration"] is not None or
+                data.get("background_mode") is not None)
 
 
 def presentation_fields(presentation, global_text=""):

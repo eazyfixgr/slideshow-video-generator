@@ -156,14 +156,15 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
                     text = self._presentation_text(presentation, "image")
                     item_duration = presentation["duration"] or image_duration
                     if presentation["template"] != "legacy":
-                        if self.settings.get("background_mode") == "fit_and_move":
+                        if self._slide_background_mode(presentation) == "fit_and_move":
                             fields = self._presentation_fields(presentation, "image")
                             before = self._presentation_before_image(presentation, fallback=img)
                             base, overlay, rect, overflow = render_design_layers(
                                 width, height, presentation, fields, before_image=before)
                             x, y, rw, rh = rect
                             image_region = self._fit_image_logic(
-                                img, rw, rh, "image", text="")
+                                img, rw, rh, "image", text="",
+                                presentation=presentation)
                             fit_move_data = getattr(image_region, "fit_move_data", None)
                             if fit_move_data is not None:
                                 if overflow:

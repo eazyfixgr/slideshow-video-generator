@@ -114,6 +114,13 @@ class TemplateRegistryTests(unittest.TestCase):
         self.assertEqual(presentation["panel_padding_pct"], 2.5)
         self.assertEqual(presentation["panel_min_height_pct"], 12)
 
+    def test_background_mode_override_is_validated(self):
+        self.assertIsNone(normalize_presentation({})["background_mode"])
+        presentation = normalize_presentation({"background_mode": "fit_and_move"})
+        self.assertEqual(presentation["background_mode"], "fit_and_move")
+        self.assertIsNone(normalize_presentation(
+            {"background_mode": "invalid"})["background_mode"])
+
 
 if __name__ == "__main__":
     unittest.main()

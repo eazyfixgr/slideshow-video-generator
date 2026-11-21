@@ -12,6 +12,12 @@ from .slide_templates import (FONT_CHOICES, PANEL_STYLE_CHOICES, STYLE_FIELDS,
 from .ui_caption_inspector import CaptionInspectorMixin
 from .ui_theme import MODERN_PALETTE as P
 
+BACKGROUND_CHOICES = {
+    "Από το project": None, "Θολό": "blur", "Λευκό": "white",
+    "Μαύρο": "black", "Fit and Move": "fit_and_move",
+}
+
+
 class InlineEditorsMixin(CaptionInspectorMixin):
     """Persist pending input before the inspector changes its scene or context."""
 
@@ -208,6 +214,18 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         template_var.set(current_name)
         template_combo.bind("<<ComboboxSelected>>", template_changed, add="+")
         self._render_slide_project_controls(body, targets, project_scope)
+        image_targets = [target for target in targets if target[0] == "image"]
+        background_var = None
+        if image_targets or not targets:
+            current_background = (normalize_presentation(
+                image_targets[0][2].get("presentation")).get("background_mode")
+                if image_targets else None)
+            background_label = next(
+                (label for label, value in BACKGROUND_CHOICES.items()
+                 if value == current_background), "Από το project")
+            background_var, _background_combo = self._inline_field(
+                body, "Φόντο φωτογραφιών", background_label, changed,
+                BACKGROUND_CHOICES)
         dirty["loading"] = True
 
         def field(label, key, choices=None):
@@ -316,6 +334,8 @@ class InlineEditorsMixin(CaptionInspectorMixin):
                 status.set("Δεν υπάρχουν media για overrides. Το template project "
                            "αλλάζει από το παραπάνω picker.")
                 return False
+            background_mode = (BACKGROUND_CHOICES.get(background_var.get())
+                               if background_var is not None else None)
             self.push_undo()
             for target in targets:
                 current = normalize_presentation(target[2].get("presentation"))
@@ -324,6 +344,8 @@ class InlineEditorsMixin(CaptionInspectorMixin):
                 current["style_overrides"] = overrides
                 for key in STYLE_FIELDS:
                     current[key] = copy.deepcopy(style[key])
+                if target[0] == "image" and background_var is not None:
+                    current["background_mode"] = background_mode
                 target[2]["presentation"] = current
             dirty["value"] = False
             self.is_modified = True
@@ -360,6 +382,8 @@ class InlineEditorsMixin(CaptionInspectorMixin):
                 current["template"] = INHERIT_TEMPLATE
                 current["template_name"] = ""
                 current["style_overrides"] = []
+                if _kind == "image":
+                    current["background_mode"] = None
                 edit["presentation"] = current
             self.reset_project_template(mark_modified=False)
         else:
@@ -368,6 +392,8 @@ class InlineEditorsMixin(CaptionInspectorMixin):
                 current["template"] = INHERIT_TEMPLATE
                 current["template_name"] = ""
                 current["style_overrides"] = []
+                if target[0] == "image":
+                    current["background_mode"] = None
                 target[2]["presentation"] = current
         self.is_modified = True
         self._inline_refresh()

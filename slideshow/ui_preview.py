@@ -119,7 +119,7 @@ class PreviewMixin:
 
     def _render_design_fitmove_preview(self, img, edit, m_type, w, h, presentation):
         """First Fit-and-Move frame for design templates, as the export starts."""
-        if self.settings.get("background_mode") != "fit_and_move":
+        if self._slide_background_mode(presentation) != "fit_and_move":
             return self._render_design_frame(img, edit, m_type, w, h)[0]
         fields = self._presentation_fields(presentation, m_type)
         before = self._presentation_before_image(presentation, fallback=img)

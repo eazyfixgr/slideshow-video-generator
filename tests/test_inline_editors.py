@@ -358,6 +358,7 @@ class InlineEditorTests(unittest.TestCase):
                          ("Όλο το project", "Φωτογραφίες / βίντεο", "Ανά σκηνή / ομάδα"))
         self.assertFalse(any(getattr(w, "cget", lambda _k: "")("text") == "Περισσότερα πεδία"
                              for w in self.widgets(ttk.Checkbutton)))
+        self.assertEqual(str(self.widgets(tk.Text)[0].cget("height")), "14")
         self.app._set_inspector_view("design")
         self.assertIs(self.app.inspector_scope_combo, combo)
         self.assertEqual(self.app.project_caption_mode, "individual")
@@ -388,21 +389,35 @@ class InlineEditorTests(unittest.TestCase):
         self.assertEqual(self.app.media_files[:2], before)
         self.assertEqual(self.app.media_files[2][2]["presentation"]["template_name"], name)
 
+    def test_design_background_override_applies_to_selected_images(self):
+        self.app._set_inspector_view("design")
+        background = next(w for w in self.widgets(ttk.Combobox)
+                          if "Fit and Move" in w.cget("values"))
+        background.set("Fit and Move")
+        self.root.update()
+        next(w for w in self.widgets(tk.Button)
+             if w.cget("text") == "Εφαρμογή εμφάνισης").invoke()
+        presentation = normalize_presentation(
+            self.app.media_files[0][2]["presentation"])
+        self.assertEqual(presentation["background_mode"], "fit_and_move")
+        self.assertEqual(self.app._slide_background_mode(presentation),
+                         "fit_and_move")
+        self.assertIsNone(normalize_presentation(
+            self.app.media_files[1][2]["presentation"])["background_mode"])
+
     def test_timing_controls_apply_to_selected_group_and_undo(self):
         self.app.media_files.append(self.app._new_item(
             "image", str(self.directory / "one.png")))
         self.app.selected_indices = {0, 1}
         self.app._set_inspector_view("design")
         spins = self.widgets(ttk.Spinbox)
-        self.assertEqual(len(spins), 2)
-        for widget, value in zip(spins, ("6", "0.4")):
-            widget.set(value)
+        self.assertEqual(len(spins), 1)
+        spins[0].set("6")
         button = next(w for w in self.widgets(ttk.Button)
-                      if w.cget("text") == "Εφαρμογή διάρκειας και εφέ")
+                      if w.cget("text") == "Εφαρμογή διάρκειας")
         button.invoke()
         for item in self.app.media_files[:2]:
             self.assertEqual(item[2]["presentation"]["duration"], 6)
-            self.assertEqual(item[2]["presentation"]["transition_duration"], 0.4)
         self.assertIsNone(self.app.media_files[2][2]["presentation"]["duration"])
         self.app.undo()
         self.assertEqual([item[2]["presentation"]["duration"]
@@ -429,6 +444,23 @@ class InlineEditorTests(unittest.TestCase):
         state = self.app._slideshow_settings_state
         self.assertTrue(state["editor"].winfo_children())
         self.assertIn("panel_min_height_pct", state["draft"])
+        self.assertGreaterEqual(int(state["preview_canvas"].cget("height")), 450)
+        self.app._settings_dialog.destroy()
+
+    def test_slideshow_settings_shows_random_as_selected_transition(self):
+        self.app.settings["transition_effect"] = "random"
+        self.app.show_slideshow_settings()
+        self.root.update()
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from walk(child)
+
+        combos = [w for w in walk(self.app._settings_dialog)
+                  if isinstance(w, ttk.Combobox) and "Random" in w.cget("values")]
+        self.assertTrue(combos)
+        self.assertEqual(combos[0].get(), "Random")
         self.app._settings_dialog.destroy()
 
     def test_deleting_available_media_keeps_project_copies(self):
