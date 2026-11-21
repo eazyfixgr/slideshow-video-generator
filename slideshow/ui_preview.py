@@ -18,6 +18,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhance,
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
+from .slide_design import render_design_layers
 
 
 class PreviewMixin:
@@ -116,6 +117,28 @@ class PreviewMixin:
             del canvas.full_image
 
 
+    def _render_design_fitmove_preview(self, img, edit, m_type, w, h, presentation):
+        """First Fit-and-Move frame for design templates, as the export starts."""
+        if self.settings.get("background_mode") != "fit_and_move":
+            return self._render_design_frame(img, edit, m_type, w, h)[0]
+        fields = self._presentation_fields(presentation, m_type)
+        before = self._presentation_before_image(presentation, fallback=img)
+        base, overlay, rect, _overflow = render_design_layers(
+            w, h, presentation, fields, before_image=before,
+            video_source=img if m_type == "video" else None)
+        x, y, rw, rh = rect
+        region = self._fit_image_logic(img, rw, rh, m_type, text="",
+                                       presentation=presentation)
+        fit_move_data = getattr(region, "fit_move_data", None)
+        if fit_move_data is None:
+            return self._render_design_frame(img, edit, m_type, w, h)[0]
+        moving = self._render_fit_and_move_frame(
+            Image.new("RGB", (max(1, rw), max(1, rh))), fit_move_data,
+            0.0, max(1, rw), max(1, rh))
+        frame = base.copy()
+        frame.paste(moving, (x, y))
+        return Image.alpha_composite(frame.convert("RGBA"), overlay).convert("RGB")
+
     def _render_preview(self, path, m_type, w, h, canvas, edit=None, t_start=0.0,
                         display_token=None):
         """Render the first frame of the export for this media type (full
@@ -129,7 +152,8 @@ class PreviewMixin:
             img = Image.open(path)
             img = self._apply_image_edit(img, edit, path, m_type="image")
             if presentation["template"] != "legacy":
-                frame, _overflow = self._render_design_frame(img, edit, "image", w, h)
+                frame = self._render_design_fitmove_preview(
+                    img, edit, "image", w, h, presentation)
             else:
                 frame = self._fit_image_logic(img, w, h, "image", text=text,
                                               presentation=presentation)
@@ -151,7 +175,8 @@ class PreviewMixin:
                 raw = self._video_first_frame(path)
             first = self._apply_image_edit(raw, edit, m_type="video")
             if presentation["template"] != "legacy":
-                frame, _overflow = self._render_design_frame(first, edit, "video", w, h)
+                frame = self._render_design_fitmove_preview(
+                    first, edit, "video", w, h, presentation)
             else:
                 layout = presentation.get("text_layout")
                 below = ((layout == "below") if layout else
