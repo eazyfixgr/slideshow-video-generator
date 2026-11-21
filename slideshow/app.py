@@ -141,6 +141,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
                 legacy_font_family=self.settings.get("font_family"),
                 legacy_text_style=self.settings.get("text_style")):
             self.save_settings()
+        self._drop_legacy_text_settings()
         self._template_registry_cache = None
         self._init_project_template_state()
         self._global_settings = copy.deepcopy(self.settings)
@@ -302,6 +303,16 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
     def _default_output_folder(self):
         return self.profile_paths["output"]
 
+    def _drop_legacy_text_settings(self):
+        """Font size/family now live inside each template, not in global settings."""
+        changed = False
+        for key in ("font_size", "font_family"):
+            if key in self.settings:
+                self.settings.pop(key, None)
+                changed = True
+        if changed:
+            self.save_settings()
+
     def template_registry(self, refresh=False):
         cache = getattr(self, "_template_registry_cache", None)
         if refresh or cache is None:
@@ -426,6 +437,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
                 legacy_font_family=self.settings.get("font_family"),
                 legacy_text_style=self.settings.get("text_style")):
             self.save_settings()
+        self._drop_legacy_text_settings()
         self._template_registry_cache = None
         self._init_project_template_state()
         self._load_profile_workspace_layout()
@@ -544,7 +556,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         default_settings = {
             "ui_theme": "modern",
             "volume_db": 0, "resolution": "1080x1080", "background_mode": "blur",
-            "cropping": False, "font_size": 32, "font_family": "Calibri",
+            "cropping": False,
             "text_style": "black_box", "auto_position_photos": False,
             "auto_position_videos": False, "mute_video_audio": True,
             "output_folder": str(self._default_output_folder()), "slide_duration": 3,

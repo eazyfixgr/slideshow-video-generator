@@ -153,7 +153,8 @@ class RenderMixin:
         family = (presentation.get("font_family") or
                   self.settings.get("font_family", "Calibri"))
         try:
-            size = int(presentation.get("font_size") or self.settings["font_size"])
+            size = int(presentation.get("font_size") or
+                       self.settings.get("font_size", 32))
         except (TypeError, ValueError):
             size = int(self.settings.get("font_size", 32) or 32)
         opacity = presentation.get("panel_opacity")
@@ -273,7 +274,7 @@ class RenderMixin:
         drawing and for estimating how much vertical space the text occupies.
         """
         if fs is None:
-            fs = self.settings["font_size"]
+            fs = self.settings.get("font_size", 32)
         font, f_bold = self._get_text_fonts(fs, family)
 
         parts = []

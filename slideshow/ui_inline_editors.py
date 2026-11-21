@@ -10,6 +10,7 @@ from .slide_templates import (FONT_CHOICES, PANEL_STYLE_CHOICES, STYLE_FIELDS,
                               TEXT_POSITION_CHOICES, read_template_registry,
                               template_base, template_style)
 from .ui_caption_inspector import CaptionInspectorMixin
+from .ui_theme import MODERN_PALETTE as P
 
 DESIGN_SCOPES = ("Όλο το project", "Τρέχουσα σκηνή", "Επιλεγμένες σκηνές",
                  "Όλες οι σκηνές")
@@ -70,7 +71,7 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         return var, widget
 
     def _inline_slider(self, parent, label, value, changed, low=0, high=100,
-                       suffix="%"):
+                       suffix="%", invert=False):
         self._inline_label(parent, label, pady=(7, 2))
         row = tk.Frame(parent, bg=self._inline_bg(parent))
         row.pack(fill="x")
@@ -84,13 +85,21 @@ class InlineEditorsMixin(CaptionInspectorMixin):
             value_lbl.configure(text="Auto" if number == 0 and suffix != "%"
                                 else f"{number}{suffix}")
 
+        initial = int(value or 0)
+        initial_display = (high - initial) if invert else initial
+
+        def on_command(number):
+            update_display(number)
+            if int(float(number)) != initial_display:
+                changed()
+
         scale = tk.Scale(row, from_=low, to=high, orient="horizontal",
                          bg=self._inline_bg(parent), fg="#f1f3f7",
                          troughcolor="#12161d", highlightthickness=0,
                          activebackground="#e8bd79", showvalue=False,
-                         command=lambda number: (update_display(number), changed()))
+                         command=on_command)
         scale.pack(side="left", fill="x", expand=True)
-        scale.set(int(value or 0))
+        scale.set(initial_display)
         update_display(scale.get())
         return scale
 
@@ -264,15 +273,16 @@ class InlineEditorsMixin(CaptionInspectorMixin):
                 s.configure(bg=v.get()) if len(v.get()) == 7 else None))
 
         slider_specs = (
-            ("panel_opacity", "Διαφάνεια πλαισίου", 0, 100),
-            ("panel_width_pct", "Πλάτος πλαισίου (0 = Auto)", 0, 100),
-            ("panel_padding_pct", "Padding πλαισίου (0 = Auto)", 0, 15),
-            ("panel_min_height_pct", "Ελάχιστο ύψος (0 = Auto)", 0, 80),
+            ("panel_opacity", "Διαφάνεια πλαισίου (0 = συμπαγές)", 0, 100, True),
+            ("panel_width_pct", "Πλάτος πλαισίου (0 = Auto)", 0, 100, False),
+            ("panel_padding_pct", "Padding πλαισίου (0 = Auto)", 0, 15, False),
+            ("panel_min_height_pct", "Ελάχιστο ύψος (0 = Auto)", 0, 80, False),
         )
         slider_widgets = {}
-        for key, label, low, high in slider_specs:
+        for key, label, low, high, invert in slider_specs:
             slider_widgets[key] = self._inline_slider(
-                body, label, draft.get(key, 0), changed, low, high)
+                body, label, draft.get(key, 0), changed, low, high,
+                invert=invert)
 
         def current_style():
             style = dict(draft)
@@ -291,7 +301,8 @@ class InlineEditorsMixin(CaptionInspectorMixin):
             for key in choice_values:
                 style[key] = choice_values[key][variables[key].get()]
             for key, scale in slider_widgets.items():
-                style[key] = int(scale.get())
+                display = int(scale.get())
+                style[key] = (100 - display) if key == "panel_opacity" else display
             style["panel_style"] = ("solid" if style["panel_opacity"] >= 60
                                     else "translucent")
             return style

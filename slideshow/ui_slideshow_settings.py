@@ -301,7 +301,7 @@ class SlideshowSettingsMixin:
             var.trace_add("write", changed)
             return var
 
-        def slider_field(key, label, low, high, suffix="%"):
+        def slider_field(key, label, low, high, suffix="%", invert=False):
             labelled(label)
             row = tk.Frame(parent, bg=P["background"])
             row.pack(fill="x")
@@ -315,19 +315,26 @@ class SlideshowSettingsMixin:
             value_lbl = tk.Label(row, textvariable=value_var, bg=P["background"],
                                  fg=P["text"], width=7, font=("Segoe UI", 8))
             value_lbl.pack(side="right", padx=(6, 0))
+
             def set_label(value):
                 value = float(value)
                 value_var.set("Auto" if int(value) == 0 and key != "panel_opacity"
                               else f"{int(value)}{suffix}")
+
+            def stored_value(display):
+                return (high - int(display)) if invert else int(display)
+
             def changed(value):
                 number = int(float(value))
-                if number == int(draft.get(key, 0) or 0):
+                stored = stored_value(number)
+                if stored == int(draft.get(key, 0) or 0):
                     set_label(value)
                     return
-                draft[key] = number
+                draft[key] = stored
                 set_label(value)
                 mark_dirty()
-            scale.set(int(draft.get(key, 0) or 0))
+            initial = int(draft.get(key, 0) or 0)
+            scale.set((high - initial) if invert else initial)
             set_label(scale.get())
             return scale
 
@@ -369,8 +376,8 @@ class SlideshowSettingsMixin:
         color_field("text_color", "Χρώμα κειμένου")
         color_field("panel_color", "Χρώμα πλαισίου")
         color_field("accent_color", "Χρώμα έμφασης")
-        combo_field("panel_style", "Στυλ πλαισίου", PANEL_STYLE_CHOICES)
-        slider_field("panel_opacity", "Διαφάνεια πλαισίου", 0, 100)
+        slider_field("panel_opacity", "Διαφάνεια πλαισίου (0 = συμπαγές)",
+                     0, 100, invert=True)
         slider_field("panel_width_pct", "Πλάτος πλαισίου (0 = Auto)", 0, 100)
         slider_field("panel_padding_pct", "Εσωτερικό padding (0 = Auto)", 0, 15)
         slider_field("panel_min_height_pct", "Ελάχιστο ύψος (0 = Auto)", 0, 80)
