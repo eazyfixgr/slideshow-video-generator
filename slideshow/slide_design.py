@@ -450,15 +450,15 @@ def render_design_layers(width, height, presentation, fields, before_image=None,
     logo_area = None
 
     if template == "navy_gold":
-        pad = max(12, int(min(w, h) * .025),
-                  int(min(w, h) * padding_pct / 100))
+        pad = (max(2, int(min(w, h) * padding_pct / 100)) if padding_pct > 0
+               else max(12, int(min(w, h) * .025)))
         logo_reserve = max(24, int(min(w, h) * .075)) if (
             p.get("logo_enabled") and p.get("logo_path") and os.path.isfile(p["logo_path"])) else 0
         probe = ImageDraw.Draw(Image.new("RGBA", (w, h)))
         _overflow, content_h, _content_w = _draw_content(
             probe, (0, 0, w - margin * 2, int(h * .45)), fields, p,
             accent, white, margin, measure_only=True)
-        panel_h = min(int(h * .48), max(int(h * .12), content_h + 2 * pad + logo_reserve))
+        panel_h = min(int(h * .48), max(1, content_h + 2 * pad + logo_reserve))
         if min_height_pct:
             panel_h = min(int(h * .85), max(panel_h, int(h * min_height_pct / 100)))
         if below_media:
@@ -491,14 +491,17 @@ def render_design_layers(width, height, presentation, fields, before_image=None,
                     max(0, panel_h - 2 * pad - logo_reserve))
         logo_area = (panel_x, panel_y, panel_w, panel_h)
     elif template == "real_estate":
-        pad = max(12, int(min(w, h) * .025))
+        pad = (max(2, int(min(w, h) * padding_pct / 100)) if padding_pct > 0
+               else max(12, int(min(w, h) * .025)))
         logo_reserve = max(24, int(min(w, h) * .075)) if (
             p.get("logo_enabled") and p.get("logo_path") and os.path.isfile(p["logo_path"])) else 0
         probe = ImageDraw.Draw(Image.new("RGBA", (w, h)))
         _overflow, content_h, _content_w = _draw_content(
             probe, (0, 0, w - margin * 2, int(h * .45)), fields, p,
             accent, white, margin, measure_only=True)
-        panel_h = min(int(h * .48), max(int(h * .12), content_h + 2 * pad + logo_reserve))
+        panel_h = min(int(h * .48), max(1, content_h + 2 * pad + logo_reserve))
+        if min_height_pct:
+            panel_h = min(int(h * .85), max(panel_h, int(h * min_height_pct / 100)))
         panel_y = 0 if p["text_position"] == "top" else h - panel_h
         image_y = panel_h if panel_y == 0 else 0
         rect = (0, image_y, w, h - panel_h)
@@ -545,8 +548,8 @@ def render_design_layers(width, height, presentation, fields, before_image=None,
             _overflow, content_h, content_w = _draw_content(
                 probe, (0, 0, content_width, content_limit), fields, p,
                 accent, white, margin, measure_only=True)
-            pad = max(14, int(min(w, h) * 0.026),
-                      int(min(w, h) * padding_pct / 100))
+            pad = (max(2, int(min(w, h) * padding_pct / 100)) if padding_pct > 0
+                   else max(14, int(min(w, h) * 0.026)))
             has_logo = bool(p.get("logo_enabled") and p.get("logo_path") and
                             os.path.isfile(p["logo_path"]))
             logo_reserve = max(24, int(min(w, h) * 0.075)) if has_logo else 0

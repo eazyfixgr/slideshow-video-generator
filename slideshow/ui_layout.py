@@ -39,12 +39,19 @@ class LayoutMixin(WorkspaceLayoutMixin):
         tk.Label(project, text="PROJECT", bg=P["panel"], fg=P["muted"],
                  font=("Segoe UI", 7, "bold")).pack(anchor="w", pady=(10, 0))
         self.name_var = tk.StringVar()
-        self.name_entry = tk.Entry(project, textvariable=self.name_var, bg=P["panel"],
+        name_row = tk.Frame(project, bg=P["panel"])
+        name_row.pack(anchor="w", pady=(0, 9))
+        self.name_entry = tk.Entry(name_row, textvariable=self.name_var, bg=P["panel"],
                                    fg=P["text"], insertbackground=P["text"],
                                    selectbackground=P["selected"], relief="flat", bd=0,
                                    highlightthickness=0, font=("Segoe UI", 14, "bold"),
                                    width=28)
-        self.name_entry.pack(anchor="w", pady=(0, 9))
+        self.name_entry.pack(side="left")
+        self.project_format_btn = flat_button(
+            name_row, f"Μορφή · {aspect_label(self.settings.get('resolution'))}",
+            self.show_project_format, background=P["raised"], foreground=P["accent"],
+            active_background=P["selected"], font=("Segoe UI", 8), padx=8, pady=3)
+        self.project_format_btn.pack(side="left", padx=(8, 0))
         self.name_var.trace_add("write", lambda *_a: self._update_saved_status())
 
         profile = tk.Frame(header, bg=P["panel"], cursor="hand2")
@@ -340,6 +347,9 @@ class LayoutMixin(WorkspaceLayoutMixin):
     def _refresh_stage(self):
         if not hasattr(self, "stage_scene_var"):
             return
+        if hasattr(self, "project_format_btn"):
+            self.project_format_btn.configure(
+                text=f"Μορφή · {aspect_label(self.settings.get('resolution'))}")
         media = getattr(self, "media_files", [])
         count = len(media)
         if not count:

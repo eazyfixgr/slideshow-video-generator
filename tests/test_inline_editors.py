@@ -1,10 +1,12 @@
 """Regression checks for embedded editors with a real Tk interpreter."""
 
 import copy
+import faulthandler
 import tempfile
 import json
 import subprocess
 import tkinter as tk
+from tkinter import ttk
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -42,6 +44,10 @@ class InlineEditorTests(unittest.TestCase):
         self.root.update()
 
     def tearDown(self):
+        if hasattr(self, "app"):
+            faulthandler.disable()
+            if self.app._crash_log_file is not None:
+                self.app._crash_log_file.close()
         if hasattr(self, "root"):
             for job in self.root.tk.splitlist(self.root.tk.call("after", "info")):
                 self.root.tk.call("after", "cancel", job)
@@ -79,11 +85,10 @@ class InlineEditorTests(unittest.TestCase):
 
     def test_group_style_preserves_content_duration_and_identity(self):
         self.app.selected_indices = {0, 1}
-        self.app._inline_design_scope = "Επιλεγμένες σκηνές"
         self.app._set_inspector_view("design")
         before = copy.deepcopy(self.app.media_files)
-        combos = self.widgets(__import__("tkinter").ttk.Combobox)
-        template = combos[1]
+        combos = self.widgets(ttk.Combobox)
+        template = combos[0]
         template.set("Elegant Navy & Gold")
         template.event_generate("<<ComboboxSelected>>")
         self.app._commit_pending_caption_apply()
@@ -346,6 +351,85 @@ class InlineEditorTests(unittest.TestCase):
         self.app.add_library_to_project([0])
         self.assertEqual(len(self.app.media_files), 5)
         self.assertFalse(self.app.media_files[4][2].get("group_id"))
+
+    def test_scope_is_shared_and_stays_above_both_tabs(self):
+        combo = self.app.inspector_scope_combo
+        self.assertEqual(tuple(combo.cget("values")),
+                         ("Όλο το project", "Φωτογραφίες / βίντεο", "Ανά σκηνή / ομάδα"))
+        self.assertFalse(any(getattr(w, "cget", lambda _k: "")("text") == "Περισσότερα πεδία"
+                             for w in self.widgets(ttk.Checkbutton)))
+        self.app._set_inspector_view("design")
+        self.assertIs(self.app.inspector_scope_combo, combo)
+        self.assertEqual(self.app.project_caption_mode, "individual")
+        self.assertEqual(len(self.app._inspector_scope_targets()), 1)
+        combo.set("Όλο το project")
+        combo.event_generate("<<ComboboxSelected>>")
+        self.root.update()
+        self.assertEqual(len(self.app._inspector_scope_targets()), 2)
+        self.app._set_inspector_view("captions")
+        self.assertEqual(self.app.inspector_scope_var.get(), "Όλο το project")
+
+    def test_design_type_scope_filters_targets(self):
+        self.app.media_files.append(self.app._new_item(
+            "video", str(self.directory / "one.png")))
+        self.app._set_caption_strategy("by_type")
+        self.app._set_inspector_view("design")
+        self.app._design_media_type = "image"
+        self.assertEqual(len(self.app._inspector_scope_targets()), 2)
+        self.app._design_media_type = "video"
+        self.assertEqual([item[0] for item in self.app._inspector_scope_targets()], ["video"])
+        self.app._render_inspector()
+        template = self.widgets(ttk.Combobox)[0]
+        name = next(name for name in template.cget("values") if name != template.get())
+        before = copy.deepcopy(self.app.media_files[:2])
+        template.set(name)
+        template.event_generate("<<ComboboxSelected>>")
+        self.root.update()
+        self.assertEqual(self.app.media_files[:2], before)
+        self.assertEqual(self.app.media_files[2][2]["presentation"]["template_name"], name)
+
+    def test_timing_controls_apply_to_selected_group_and_undo(self):
+        self.app.media_files.append(self.app._new_item(
+            "image", str(self.directory / "one.png")))
+        self.app.selected_indices = {0, 1}
+        self.app._set_inspector_view("design")
+        spins = self.widgets(ttk.Spinbox)
+        self.assertEqual(len(spins), 2)
+        for widget, value in zip(spins, ("6", "0.4")):
+            widget.set(value)
+        button = next(w for w in self.widgets(ttk.Button)
+                      if w.cget("text") == "Εφαρμογή διάρκειας και εφέ")
+        button.invoke()
+        for item in self.app.media_files[:2]:
+            self.assertEqual(item[2]["presentation"]["duration"], 6)
+            self.assertEqual(item[2]["presentation"]["transition_duration"], 0.4)
+        self.assertIsNone(self.app.media_files[2][2]["presentation"]["duration"])
+        self.app.undo()
+        self.assertEqual([item[2]["presentation"]["duration"]
+                          for item in self.app.media_files[:2]], [4, 7])
+
+    def test_format_dialog_updates_project_and_header(self):
+        self.assertIs(self.app.project_format_btn.master, self.app.name_entry.master)
+        self.app.show_project_format()
+        dialog = self.app._project_format_dialog
+        body = dialog.winfo_children()[0]
+        radio = next(w for w in body.winfo_children()
+                     if isinstance(w, ttk.Radiobutton) and w.cget("value") == "4:5")
+        radio.invoke()
+        row = body.winfo_children()[-1]
+        next(w for w in row.winfo_children()
+             if w.cget("text") == "Εφαρμογή μορφής").invoke()
+        self.assertEqual(self.app.settings["resolution"], "1080x1350")
+        self.assertIn("4:5", self.app.project_format_btn.cget("text"))
+        self.assertEqual(self.app._capture_project_settings()["resolution"], "1080x1350")
+
+    def test_slideshow_settings_builds_template_fields(self):
+        self.app.show_slideshow_settings()
+        self.root.update()
+        state = self.app._slideshow_settings_state
+        self.assertTrue(state["editor"].winfo_children())
+        self.assertIn("panel_min_height_pct", state["draft"])
+        self.app._settings_dialog.destroy()
 
     def test_deleting_available_media_keeps_project_copies(self):
         self.app.library_media = []

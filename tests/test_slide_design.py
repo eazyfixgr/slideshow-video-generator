@@ -26,6 +26,23 @@ from slideshow.design_templates import (design_template_choices, read_design_tem
 
 
 class PresentationModelTests(unittest.TestCase):
+    def test_short_caption_panel_can_shrink_below_old_twelve_percent_floor(self):
+        for template in ("navy_gold", "real_estate"):
+            with self.subTest(template=template):
+                p = normalize_presentation({
+                    "template": template, "font_size": 60,
+                    "panel_padding_pct": 1, "panel_min_height_pct": 0,
+                })
+                fields = {"description": "Μόνο μία γραμμή"}
+                _base, _overlay, rect, overflow = render_design_layers(1080, 1920, p, fields)
+                compact_height = 1920 - rect[3]
+                self.assertLess(compact_height, 1920 * .12)
+                self.assertFalse(overflow)
+                p["panel_min_height_pct"] = 15
+                _base, _overlay, taller_rect, _overflow = render_design_layers(
+                    1080, 1920, p, fields)
+                self.assertGreaterEqual(1920 - taller_rect[3], 1920 * .15)
+
     def test_main_window_starts_maximized_and_keeps_saved_geometry(self):
         class Root:
             geometry_value = None

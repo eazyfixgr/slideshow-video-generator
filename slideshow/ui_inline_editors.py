@@ -12,10 +12,6 @@ from .slide_templates import (FONT_CHOICES, PANEL_STYLE_CHOICES, STYLE_FIELDS,
 from .ui_caption_inspector import CaptionInspectorMixin
 from .ui_theme import MODERN_PALETTE as P
 
-DESIGN_SCOPES = ("Όλο το project", "Τρέχουσα σκηνή", "Επιλεγμένες σκηνές",
-                 "Όλες οι σκηνές")
-
-
 class InlineEditorsMixin(CaptionInspectorMixin):
     """Persist pending input before the inspector changes its scene or context."""
 
@@ -139,38 +135,17 @@ class InlineEditorsMixin(CaptionInspectorMixin):
             self._refresh_rich_tags(widget)
         return widget
 
-    def _inline_scope(self, body, values, attribute, fallback):
-        current = getattr(self, attribute, fallback)
-        if current not in values:
-            current = fallback
-        scope, combo = self._inline_field(body, "Εφαρμογή σε", current,
-                                           lambda: None, choices=values)
-
-        def select(_event):
-            self._commit_pending_caption_apply()
-            setattr(self, attribute, scope.get())
-            self._render_inspector()
-        combo.bind("<<ComboboxSelected>>", select)
-        return current
-
     # ----------------------------------------------------------- design panel
     def _render_design_inspector(self, body):
         self.inspector_title_var.set("Slide Design")
         registry = read_template_registry(self.settings)
         names = list(registry)
         default_name = self._default_template_name(registry)
-        scope = self._inline_scope(body, DESIGN_SCOPES, "_inline_design_scope",
-                                   "Όλο το project")
-        index, item = self._selected_item()
-        project_scope = scope == "Όλο το project"
-        if scope == "Τρέχουσα σκηνή":
-            targets = [item] if item is not None else []
-        elif scope == "Επιλεγμένες σκηνές":
-            targets = [self.media_files[i] for i in self._selected()]
-        elif scope == "Όλες οι σκηνές":
-            targets = list(self.media_files)
-        else:
-            targets = list(self.media_files)
+        scope = self.project_caption_mode
+        project_scope = scope == "all"
+        if scope == "by_type":
+            self._render_design_type_selector(body)
+        targets = self._inspector_scope_targets()
 
         if not project_scope and not targets:
             self._empty_inspector(body, "Διάλεξε μια σκηνή ή μια ομάδα media για να "
@@ -179,7 +154,8 @@ class InlineEditorsMixin(CaptionInspectorMixin):
 
         if project_scope:
             current_name = self._effective_project_template_name(registry)
-            draft = template_style(current_name, registry)
+            draft = (self._resolve_presentation_style(targets[0][2].get("presentation"))
+                     if targets else template_style(current_name, registry))
         else:
             resolved = self._resolve_presentation_style(
                 normalize_presentation(targets[0][2].get("presentation"),
@@ -196,13 +172,7 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         def changed():
             if not dirty["loading"]:
                 dirty["value"] = True
-                status.set("Πάτησε «Εφαρμογή εμφάνισης» για το project.")
-
-        self._inline_label(
-            body, "Οι αλλαγές εδώ είναι overrides του project. Για μόνιμες αλλαγές "
-                  "template: Settings → Slideshow Settings. Το Reset γυρίζει το project "
-                  "στο default των ρυθμίσεων· για σκηνή/ομάδα στο template του project.",
-            pady=(10, 2))
+                status.set("Πάτησε «Εφαρμογή εμφάνισης» για την επιλογή σου.")
 
         def template_changed(_event=None):
             name = template_var.get()
@@ -210,6 +180,12 @@ class InlineEditorsMixin(CaptionInspectorMixin):
                 return
             entry = registry[name]
             if project_scope:
+                self.push_undo()
+                for target in targets:
+                    current = normalize_presentation(target[2].get("presentation"))
+                    current.update(template=INHERIT_TEMPLATE, template_name="",
+                                   style_overrides=[])
+                    target[2]["presentation"] = current
                 self.set_project_template(name)
                 return
             self.push_undo()
@@ -218,8 +194,6 @@ class InlineEditorsMixin(CaptionInspectorMixin):
                 current = normalize_presentation(edit.get("presentation"))
                 current["template"] = entry["base"]
                 current["template_name"] = name
-                current["style_overrides"] = []
-                current.pop("style_overrides", None)
                 current["style_overrides"] = []
                 edit["presentation"] = current
             self.is_modified = True
@@ -233,7 +207,7 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         template_combo.configure(values=names)
         template_var.set(current_name)
         template_combo.bind("<<ComboboxSelected>>", template_changed, add="+")
-        self._render_slide_project_controls(body)
+        self._render_slide_project_controls(body, targets, project_scope)
         dirty["loading"] = True
 
         def field(label, key, choices=None):
@@ -294,7 +268,7 @@ class InlineEditorsMixin(CaptionInspectorMixin):
             ("panel_opacity", "Διαφάνεια πλαισίου (0 = συμπαγές)", 0, 100, True),
             ("panel_width_pct", "Πλάτος πλαισίου (0 = Auto)", 0, 100, False),
             ("panel_padding_pct", "Padding πλαισίου (0 = Auto)", 0, 15, False),
-            ("panel_min_height_pct", "Ελάχιστο ύψος (0 = Auto)", 0, 80, False),
+            ("panel_min_height_pct", "Ελάχιστο ύψος (0 = μόνο όσο χρειάζεται το κείμενο)", 0, 80, False),
         )
         slider_widgets = {}
         for key, label, low, high, invert in slider_specs:
@@ -354,7 +328,7 @@ class InlineEditorsMixin(CaptionInspectorMixin):
             dirty["value"] = False
             self.is_modified = True
             self._inline_refresh()
-            status.set("Η εμφάνιση εφαρμόστηκε ως override του project.")
+            status.set("Η εμφάνιση εφαρμόστηκε στην επιλογή σου.")
             return True
 
         self._caption_apply_callback = apply
@@ -379,14 +353,15 @@ class InlineEditorsMixin(CaptionInspectorMixin):
                 "Να επαναφερθεί η εμφάνιση στο default template των ρυθμίσεων;",
                 parent=self.root):
             return
+        self.push_undo()
         if project_scope:
-            self.reset_project_template(mark_modified=False)
             for _kind, _path, edit in self.media_files:
                 current = normalize_presentation(edit.get("presentation"))
                 current["template"] = INHERIT_TEMPLATE
                 current["template_name"] = ""
                 current["style_overrides"] = []
                 edit["presentation"] = current
+            self.reset_project_template(mark_modified=False)
         else:
             for target in targets:
                 current = normalize_presentation(target[2].get("presentation"))

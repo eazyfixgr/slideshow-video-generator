@@ -14,13 +14,6 @@ CAPTION_STRATEGIES = {
     "Φωτογραφίες / βίντεο": "by_type",
     "Ανά σκηνή / ομάδα": "individual",
 }
-CAPTION_FIELDS = {
-    "category": "Κατηγορία / τύπος", "location": "Τοποθεσία", "price": "Τιμή",
-    "details": "Λεπτομέρειες", "cta": "Call to action", "business_name": "Επωνυμία",
-    "phone": "Τηλέφωνο", "website": "Ιστότοπος",
-}
-
-
 class CaptionInspectorMixin:
     def _caption_text_from_item(self, item):
         kind, _path, edit = item
@@ -318,11 +311,6 @@ class CaptionInspectorMixin:
     def _render_captions_inspector(self, body):
         self.inspector_title_var.set("Captions")
         strategy = self.project_caption_mode
-        label = next(label for label, value in CAPTION_STRATEGIES.items() if value == strategy)
-        choice, combo = self._inline_field(body, "Εφαρμογή σε", label, lambda: None,
-                                            CAPTION_STRATEGIES)
-        combo.bind("<<ComboboxSelected>>",
-                   lambda _e: self._set_caption_strategy(CAPTION_STRATEGIES[choice.get()]))
         individual = strategy == "individual"
         _index, item = self._selected_item()
         media = self.media_files
@@ -365,16 +353,6 @@ class CaptionInspectorMixin:
                                        rich=True, accent_color=accent_color)
             fields["description"] = widget
             widgets["description"] = widget
-            value = normalize_presentation(targets[0][2].get("presentation"))
-            advanced = ttk.LabelFrame(body, text="Προαιρετικές πληροφορίες", padding=5)
-            toggle = tk.BooleanVar(value=False)
-            ttk.Checkbutton(body, text="Περισσότερα πεδία", variable=toggle,
-                            command=lambda: advanced.pack(fill="x") if toggle.get()
-                            else advanced.pack_forget()).pack(anchor="w", pady=6)
-            for key, label in CAPTION_FIELDS.items():
-                var, entry = self._inline_field(advanced, label, value[key],
-                                                lambda k=key: changed(k))
-                fields[key], widgets[key] = var, entry
         else:
             shared = (("project_text_all", "Κοινό κείμενο"),) if strategy == "all" else (
                 ("project_text_photos", "Κείμενο φωτογραφιών"),

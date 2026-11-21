@@ -28,6 +28,10 @@ class LibraryMixin:
     def _editor_snapshot(self):
         return copy.deepcopy({"media": self.media_files,
                               "library": self.library_media,
+                              "timing": {key: self.settings.get(key) for key in (
+                                  "slide_duration", "transition_effect", "transition_duration")},
+                              "timing": {key: self.settings.get(key) for key in
+                                         ("slide_duration", "transition_effect", "transition_duration")},
                               "caption_mode": self.project_caption_mode,
                               "all": self.project_text_all,
                               "photos": self.project_text_photos,
@@ -37,6 +41,8 @@ class LibraryMixin:
     def _restore_editor_snapshot(self, snapshot):
         self.media_files = snapshot["media"]
         self.library_media = snapshot.get("library", [])
+        self.settings.update(snapshot.get("timing", {}))
+        self.settings.update(snapshot.get("timing", {}))
         self.project_caption_mode = snapshot["caption_mode"]
         self.project_text_all = snapshot["all"]
         self.project_text_photos = snapshot["photos"]
