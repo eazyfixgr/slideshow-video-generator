@@ -4,7 +4,8 @@ import re
 import tkinter as tk
 from tkinter import ttk
 
-from .rich_text import markup_ranges, parse_markup, size_factor
+from .rich_text import (markup_ranges, parse_markup, size_factor,
+                        strip_markup)
 from .slide_design import legacy_text, normalize_presentation
 from .ui_theme import MODERN_PALETTE as P
 from .ui_widgets import flat_button
@@ -174,6 +175,11 @@ class CaptionInspectorMixin:
             markup_button.configure(
                 foreground=accent if widget._rich_show_markup else P["muted"])
 
+        def clear_formatting():
+            widget = focused.get("widget")
+            if isinstance(widget, tk.Text):
+                self._clear_rich_formatting(widget)
+
         flat_button(row, "B", lambda: apply("bold"), background=P["raised"],
                     foreground=P["text"], active_background=P["selected"],
                     font=("Segoe UI", 9, "bold"), padx=8, pady=2,
@@ -194,13 +200,46 @@ class CaptionInspectorMixin:
             row, "Markup", toggle_markup, background=P["raised"],
             foreground=P["muted"], active_background=P["selected"],
             font=("Segoe UI", 8), padx=6, pady=2, takefocus=0)
-        markup_button.pack(side="left")
+        markup_button.pack(side="left", padx=(0, 3))
+        flat_button(row, "Clear", clear_formatting, background=P["raised"],
+                    foreground=P["danger"], active_background=P["selected"],
+                    font=("Segoe UI", 8), padx=5, pady=2,
+                    takefocus=0).pack(side="left")
         tk.Label(parent, text="Επίλεξε κείμενο · **bold**   "
                               "##χρώμα έμφασης##   %+1%μεγαλύτερο%%   "
                               "%-1%μικρότερο%%",
                  bg=P["panel"], fg=P["muted"], font=("Segoe UI", 8),
                  anchor="w", justify="left", wraplength=300).pack(
             fill="x", pady=(2, 4))
+
+    def _clear_rich_formatting(self, widget):
+        try:
+            start = widget.index(tk.SEL_FIRST)
+            end = widget.index(tk.SEL_LAST)
+            selected = True
+        except tk.TclError:
+            start = "1.0"
+            end = widget.index("end-1c")
+            selected = False
+        text = widget.get(start, end)
+        cleaned = strip_markup(text)
+        if cleaned == text:
+            self._refresh_rich_tags(widget)
+            return
+        widget.delete(start, end)
+        widget.insert(start, cleaned)
+        if selected:
+            self._finish_rich_edit(
+                widget, start, widget.index(f"{start}+{len(cleaned)}c"))
+        else:
+            pos = widget.index("end-1c")
+            widget.mark_set(tk.INSERT, pos)
+            widget.focus_set()
+            callback = getattr(widget, "_inline_on_change", None)
+            if callback:
+                callback()
+            else:
+                self._refresh_rich_tags(widget)
 
     def _format_rich_selection(self, widget, kind, delta=1):
         try:

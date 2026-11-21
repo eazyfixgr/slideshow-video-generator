@@ -23,6 +23,15 @@ DEEPSEEK_MODELS = ["deepseek-chat", "deepseek-reasoner"]
 LOCAL_BASE_URL = "http://localhost:11434/v1"
 LOCAL_MODELS = ["llama3.1", "qwen2.5", "gemma2", "mistral", "phi3"]
 
+DIRECTOR_PROVIDERS = {
+    "DeepSeek": (DEFAULT_BASE_URL, "deepseek-chat", ""),
+    "OpenAI": ("https://api.openai.com/v1", "gpt-4o-mini", "gpt-4o-mini"),
+    "OpenRouter": ("https://openrouter.ai/api/v1", "openai/gpt-4o-mini",
+                   "openai/gpt-4o-mini"),
+    "Ollama (τοπικό)": (LOCAL_BASE_URL, "llama3.1", "llava"),
+    "Custom / άλλο API": ("", "", ""),
+}
+
 # The app renders rich caption markup out of the box, and every newline becomes
 # its own line in the video, so the model is told to respect both.
 SYSTEM_PROMPT = (
@@ -227,7 +236,7 @@ class AITextMixin:
         set_status(msg, color)
 
     # ---------------------------------------------------------- settings UI
-    def show_ai_settings(self):
+    def _legacy_show_ai_settings(self):
         dlg = tk.Toplevel(self.root)
         dlg.title("AI — Βελτίωση κειμένου (DeepSeek ή Τοπικό)")
         dlg.geometry("680x740")

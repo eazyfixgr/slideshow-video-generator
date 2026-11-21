@@ -51,7 +51,9 @@ class PresentationModelTests(unittest.TestCase):
             def geometry(self, value):
                 self.geometry_value = value
 
-            def state(self, value):
+            def state(self, value=None):
+                if value is None:
+                    return self.state_value or "normal"
                 self.state_value = value
 
         app = object.__new__(SlideshowApp)

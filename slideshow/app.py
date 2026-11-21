@@ -39,6 +39,8 @@ from .ui_profile_dialogs import ProfileDialogsMixin
 from .ui_preview import PreviewMixin
 from .ui_text import TextInputMixin
 from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
+from .ui_ai_settings import AISettingsMixin
+from .ui_ai_director import AIDirectorMixin
 from .ui_presentation import PresentationMixin
 from .ui_captions import CaptionsMixin
 from .slide_design import normalize_template, normalize_presentation
@@ -73,7 +75,7 @@ PROJECT_TRANSITIONS = {"none", "fade", "fadeblack", "fadewhite", "wipeleft", "wi
                        "wipeup", "wipedown", "smoothleft", "smoothright", "random"}
 
 
-class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, StoryboardMixin, MediaRecoveryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, ProfileDialogsMixin, WelcomeMixin, ThemeMixin, SlideshowSettingsMixin, SettingsMixin, InspectorMixin, ExportPanelMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin):
+class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, StoryboardMixin, MediaRecoveryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, ProfileDialogsMixin, WelcomeMixin, ThemeMixin, SlideshowSettingsMixin, SettingsMixin, InspectorMixin, ExportPanelMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin, AISettingsMixin, AIDirectorMixin):
     """Composes every mixin above into the one application object."""
 
     def __init__(self, root, show_welcome=True):
@@ -622,7 +624,15 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
             "ai_base_url": DEFAULT_BASE_URL, "ai_global_instructions": "",
             "ai_provider": "deepseek",
             "ai_local_url": "http://localhost:11434/v1",
-            "ai_local_model": "llama3.1"
+            "ai_local_model": "llama3.1",
+            "ai_director_provider": "deepseek",
+            "ai_director_api_key": "",
+            "ai_director_base_url": DEFAULT_BASE_URL,
+            "ai_director_model": "deepseek-chat",
+            "ai_director_vision": False,
+            "ai_director_vision_model": "",
+            "ai_director_max_images": 8,
+            "ai_director_style": "",
         }
         if self.settings_file.exists():
             try:
@@ -1174,9 +1184,14 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         raw_library = data.get("library_media")
         if raw_library is None:
             raw_library = data.get("media_files", data.get("media", []))
-        self.library_media = [
-            self._new_item(kind, path) for kind, path, _edit in
-            self.normalize_media_list(raw_library)]
+        self.library_media = []
+        for kind, path, saved_edit in self.normalize_media_list(raw_library):
+            item = self._new_item(kind, path)
+            for key in ("library_id", "ai_description"):
+                if saved_edit.get(key):
+                    item[2][key] = saved_edit[key]
+            self.library_media.append(item)
+        self._ensure_library_ids()
         self._migrate_image_exif()
         if not had_project_template:
             # Previous releases wrote "legacy" for the default appearance.

@@ -605,19 +605,80 @@ class WelcomeMixin:
         menu.add_command(label="Άνοιγμα",
                          command=lambda path=record["path"]:
                          self._open_project_from_welcome(path))
-        menu.add_command(label="Άνοιγμα φακέλου",
+        menu.add_command(label="Άνοιγμα φακέλου media",
                          command=lambda path=record["path"]:
                          self._open_project_folder(path))
+        menu.add_separator()
+        menu.add_command(label="Διαγραφή project",
+                         command=lambda path=record["path"]:
+                         self._delete_project_from_welcome(path))
         for widget in (card, cover, name):
             widget.bind("<Button-3>", lambda e, m=menu: m.tk_popup(e.x_root, e.y_root))
         return card
 
+    def _project_media_folder(self, project_path):
+        """The folder that contains the project's media folders.
+
+        Files in ``...\\ΒΙΝΤΕΟ`` and ``...\\photos`` open their shared parent
+        (``...\\RECS 1172 ...``), not the individual media subfolder.
+        """
+        import os
+        project_path = Path(project_path)
+        try:
+            with open(project_path, "r", encoding="utf-8-sig") as stream:
+                data = json.load(stream)
+        except Exception:
+            return project_path.parent
+        media = data.get("media_files", data.get("media", []))
+        parents = []
+        for item in media if isinstance(media, list) else []:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            try:
+                parent = Path(str(item[1])).expanduser().parent
+            except (OSError, ValueError):
+                continue
+            if parent.is_dir():
+                parents.append(parent)
+        if not parents:
+            return project_path.parent
+        try:
+            common = Path(os.path.commonpath([str(parent) for parent in parents]))
+        except (ValueError, OSError):
+            common = parents[0]
+        if common.parent == common:
+            common = parents[0]
+        media_names = {"photos", "photo", "images", "image", "video", "videos",
+                       "media", "βιντεο", "βίντεο", "φωτογραφιες", "φωτογραφίες"}
+        if common.name.casefold() in media_names and common.parent != common:
+            common = common.parent
+        return common
+
     def _open_project_folder(self, path):
         import os
         try:
-            os.startfile(str(Path(path).parent))
+            os.startfile(str(self._project_media_folder(path)))
         except OSError:
             pass
+
+    def _delete_project_from_welcome(self, path):
+        path = Path(path)
+        if not messagebox.askyesno(
+                "Διαγραφή project",
+                f"Να διαγραφεί το project «{path.stem}»;\n\n"
+                "Τα media και οι φάκελοί τους ΔΕΝ διαγράφονται.",
+                parent=getattr(self, "_welcome_dialog", None) or self.root):
+            return
+        last = self.get_last_project()
+        try:
+            path.unlink()
+        except OSError as error:
+            messagebox.showerror("Διαγραφή project", f"Δεν διαγράφηκε:\n{error}")
+            return
+        if last is not None and Path(last) == path:
+            self.set_last_project("")
+        self._finish_welcome()
+        self.root.after(0, self.show_welcome_screen)
 
     def _queue_card_thumbs(self, todo, width, height):
         state = getattr(self, "_welcome_state", None)

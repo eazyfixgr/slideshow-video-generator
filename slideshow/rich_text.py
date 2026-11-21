@@ -97,6 +97,11 @@ def markup_ranges(text):
     return [(match.start(), match.end()) for match in _MARKERS.finditer(str(text or ""))]
 
 
+def strip_markup(text):
+    """Remove formatting tokens while keeping their text."""
+    return _MARKERS.sub("", str(text or ""))
+
+
 def size_factor(steps):
     try:
         steps = int(steps)

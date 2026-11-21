@@ -389,6 +389,27 @@ class InlineEditorTests(unittest.TestCase):
         self.assertEqual(self.app.media_files[:2], before)
         self.assertEqual(self.app.media_files[2][2]["presentation"]["template_name"], name)
 
+    def test_header_center_director_and_unified_ai_settings(self):
+        self.assertTrue(hasattr(self.app, "ai_director_btn"))
+        self.assertFalse(hasattr(self.app, "header_profile_name"))
+        dialog = self.app.show_ai_settings()
+        self.root.update()
+        notebooks = [w for w in dialog.winfo_children()
+                     if isinstance(w, ttk.Notebook)]
+        self.assertTrue(notebooks)
+        self.assertEqual(len(notebooks[0].tabs()), 3)
+        dialog.destroy()
+
+    def test_clear_formatting_removes_markup_from_caption(self):
+        widget = self.widgets(tk.Text)[0]
+        widget.delete("1.0", "end")
+        widget.insert("1.0", "**bold** ##accent## %+1%μεγάλο%%")
+        widget.tag_add(tk.SEL, "1.0", "end-1c")
+        self.app._clear_rich_formatting(widget)
+        self.root.update()
+        self.assertEqual(widget.get("1.0", "end-1c"),
+                         "bold accent μεγάλο")
+
     def test_design_background_override_applies_to_selected_images(self):
         self.app._set_inspector_view("design")
         background = next(w for w in self.widgets(ttk.Combobox)

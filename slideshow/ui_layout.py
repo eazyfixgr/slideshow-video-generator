@@ -5,12 +5,11 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from .deps import ImageTk, DND_FILES, TKDND_AVAILABLE
-from .profiles import initials
+from .deps import DND_FILES, TKDND_AVAILABLE
 from .ui_workspace_layout import WorkspaceLayoutMixin
 from .slide_design import TEMPLATES, normalize_presentation, normalize_template
 from .ui_theme import MODERN_PALETTE as P
-from .ui_widgets import (ScrollFrame, aspect_label, avatar_image, flat_button,
+from .ui_widgets import (ScrollFrame, aspect_label, flat_button,
                          format_duration, primary_button)
 
 
@@ -54,23 +53,12 @@ class LayoutMixin(WorkspaceLayoutMixin):
         self.project_format_btn.pack(side="left", padx=(8, 0))
         self.name_var.trace_add("write", lambda *_a: self._update_saved_status())
 
-        profile = tk.Frame(header, bg=P["panel"], cursor="hand2")
-        profile.pack(side="left", padx=(18, 0), pady=12)
-        self.header_profile_avatar = tk.Label(profile, bg=P["panel"], bd=0)
-        self.header_profile_avatar.pack(side="left")
-        profile_text = tk.Frame(profile, bg=P["panel"])
-        profile_text.pack(side="left", padx=(7, 0))
-        self.header_profile_name = tk.Label(profile_text, text="", bg=P["panel"],
-                                            fg=P["text"], font=("Segoe UI", 9, "bold"),
-                                            anchor="w")
-        self.header_profile_name.pack(anchor="w")
-        self.header_profile_role = tk.Label(profile_text, text="", bg=P["panel"],
-                                            fg=P["muted"], font=("Segoe UI", 7),
-                                            anchor="w")
-        self.header_profile_role.pack(anchor="w")
-        for widget in (profile, profile_text, self.header_profile_avatar,
-                       self.header_profile_name, self.header_profile_role):
-            widget.bind("<Button-1>", lambda _e: self.open_edit_profile_dialog())
+        center = tk.Frame(header, bg=P["panel"])
+        center.place(relx=0.5, rely=0.5, anchor="center")
+        self.ai_director_btn = primary_button(
+            center, "AI Director", self.show_ai_director,
+            font=("Segoe UI", 10, "bold"), padx=18, pady=7)
+        self.ai_director_btn.pack()
 
         right = tk.Frame(header, bg=P["panel"])
         right.pack(side="right", fill="y", padx=(0, 12))
@@ -95,14 +83,6 @@ class LayoutMixin(WorkspaceLayoutMixin):
         self.saved_status_label.pack(side="right", padx=(0, 10), pady=15)
 
     def _update_header_widgets(self):
-        profile = self.active_profile_data
-        self.header_profile_name.configure(text=profile.get("name", "Προφίλ"))
-        self.header_profile_role.configure(text=profile.get("role", "") or "Προφίλ")
-        image = avatar_image(initials(profile.get("name")), profile.get("color", P["accent"]),
-                             34, P["panel"])
-        photo = ImageTk.PhotoImage(image, master=self.root)
-        self._header_avatar_photo = photo
-        self.header_profile_avatar.configure(image=photo)
         self._update_saved_status()
         self._update_window_title()
 

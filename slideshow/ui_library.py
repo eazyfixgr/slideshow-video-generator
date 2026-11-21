@@ -26,23 +26,38 @@ class LibraryMixin:
 
     # ----------------------------------------------------------- undo/redo
     def _editor_snapshot(self):
-        return copy.deepcopy({"media": self.media_files,
-                              "library": self.library_media,
-                              "timing": {key: self.settings.get(key) for key in (
-                                  "slide_duration", "transition_effect", "transition_duration")},
-                              "timing": {key: self.settings.get(key) for key in
-                                         ("slide_duration", "transition_effect", "transition_duration")},
-                              "caption_mode": self.project_caption_mode,
-                              "all": self.project_text_all,
-                              "photos": self.project_text_photos,
-                              "videos": self.project_text_videos,
-                              "instructions": self.project_ai_instructions})
+        return copy.deepcopy({
+            "media": self.media_files,
+            "library": self.library_media,
+            "timing": {key: self.settings.get(key) for key in
+                       ("slide_duration", "transition_effect", "transition_duration")},
+            "resolution": self.settings.get("resolution"),
+            "project_template": self.project_template,
+            "project_template_name": self.project_template_name,
+            "project_template_override": self.project_template_override,
+            "project_settings": self.project_settings,
+            "active_project_settings": self._active_project_settings,
+            "caption_mode": self.project_caption_mode,
+            "all": self.project_text_all,
+            "photos": self.project_text_photos,
+            "videos": self.project_text_videos,
+            "instructions": self.project_ai_instructions,
+        })
 
     def _restore_editor_snapshot(self, snapshot):
         self.media_files = snapshot["media"]
         self.library_media = snapshot.get("library", [])
         self.settings.update(snapshot.get("timing", {}))
-        self.settings.update(snapshot.get("timing", {}))
+        if snapshot.get("resolution"):
+            self.settings["resolution"] = snapshot["resolution"]
+        self.project_template = snapshot.get("project_template", self.project_template)
+        self.project_template_name = snapshot.get("project_template_name",
+                                                  self.project_template_name)
+        self.project_template_override = bool(snapshot.get(
+            "project_template_override", self.project_template_override))
+        self.project_settings = copy.deepcopy(snapshot.get("project_settings", {}))
+        self._active_project_settings = bool(snapshot.get(
+            "active_project_settings", self._active_project_settings))
         self.project_caption_mode = snapshot["caption_mode"]
         self.project_text_all = snapshot["all"]
         self.project_text_photos = snapshot["photos"]
@@ -81,6 +96,11 @@ class LibraryMixin:
         self._refresh_inspector_after_media()
 
     # ------------------------------------------------------------ adding
+    def _ensure_library_ids(self):
+        for _kind, _path, edit in self.library_media:
+            if not edit.get("library_id"):
+                edit["library_id"] = uuid.uuid4().hex
+
     def _append_library_paths(self, files):
         first = len(self.library_media)
         added = False
@@ -88,11 +108,14 @@ class LibraryMixin:
             path = str(f).strip('{} ')
             ext = Path(path).suffix.lower()
             if ext in ('.mp4', '.avi', '.mov', '.mkv'):
-                self.library_media.append(self._new_item("video", path))
-                added = True
+                item = self._new_item("video", path)
             elif ext in ('.jpg', '.jpeg', '.png', '.bmp'):
-                self.library_media.append(self._new_item("image", path))
-                added = True
+                item = self._new_item("image", path)
+            else:
+                continue
+            item[2]["library_id"] = uuid.uuid4().hex
+            self.library_media.append(item)
+            added = True
         if added:
             self.library_selected_indices = set(
                 range(first, len(self.library_media)))
@@ -500,8 +523,10 @@ class LibraryMixin:
         start = len(self.media_files)
         group_id = uuid.uuid4().hex if len(indices) > 1 else ""
         for index in indices:
-            kind, path, _edit = self.library_media[index]
+            kind, path, source_edit = self.library_media[index]
             _kind, _path, copied = self._new_item(kind, path)
+            if source_edit.get("library_id"):
+                copied["source_library_id"] = source_edit["library_id"]
             if group_id:
                 copied["group_id"] = group_id
             self.media_files.append((kind, path, copied))
