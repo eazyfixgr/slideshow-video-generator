@@ -30,7 +30,8 @@ class StoryboardMixin:
         self.storyboard_count_var = tk.StringVar(value="0 σκηνές")
         tk.Label(header, textvariable=self.storyboard_count_var, bg=P["panel"],
                  fg=P["text"], font=("Segoe UI", 9, "bold")).pack(side="left", padx=(8, 0))
-        tk.Label(header, text="Σύρε τις κάρτες για αναδιάταξη · διπλό κλικ για επεξεργασία",
+        tk.Label(header, text="Σύρε για αναδιάταξη · διπλό κλικ για επεξεργασία · "
+                              "Ctrl/Shift για ομάδα και δεξί κλικ για ομαδοποίηση",
                  bg=P["panel"], fg=P["muted"], font=("Segoe UI", 8)).pack(
             side="left", padx=(14, 0))
         canvas = tk.Canvas(frame, bg=P["panel"], highlightthickness=0, height=120)
@@ -53,6 +54,7 @@ class StoryboardMixin:
         self.storyboard_window = window
         self._sb_widgets = []
         self._sb_drag = None
+        self._sb_anchor = None
         self._sb_token = 0
         self._sb_photo_refs = {}
         if not hasattr(self, "_sb_thumb_cache"):
@@ -130,7 +132,36 @@ class StoryboardMixin:
 
         start = 0.0
         pending = []
-        for index, item in enumerate(self.media_files):
+        index = 0
+        while index < count:
+            item = self.media_files[index]
+            group_id = item[2].get("group_id")
+            if group_id:
+                end = index + 1
+                while (end < count and
+                       self.media_files[end][2].get("group_id") == group_id):
+                    end += 1
+                group = tk.Frame(self.storyboard_inner, bg=P["accent_faint"],
+                                 highlightbackground=P["accent"],
+                                 highlightthickness=2, padx=2, pady=2)
+                group.pack(side="left", padx=5, pady=4)
+                group.bind("<MouseWheel>", self._storyboard_scroll_wheel)
+                for grouped in range(index, end):
+                    item = self.media_files[grouped]
+                    seconds = self._scene_seconds(item)
+                    card = self._make_storyboard_card(
+                        grouped, item, start, seconds, parent=group, pack=False)
+                    card.pack(side="left", padx=2, pady=1)
+                    start += seconds
+                    self._sb_widgets.append(card)
+                    key = self._storyboard_thumb_key(item)
+                    cached = self._sb_thumb_cache.get(key)
+                    if cached is not None:
+                        self._apply_storyboard_thumb(card, grouped, cached)
+                    else:
+                        pending.append((grouped, item, card))
+                index = end
+                continue
             seconds = self._scene_seconds(item)
             card = self._make_storyboard_card(index, item, start, seconds)
             start += seconds
@@ -141,16 +172,19 @@ class StoryboardMixin:
                 self._apply_storyboard_thumb(card, index, cached)
             else:
                 pending.append((index, item, card))
+            index += 1
         if pending:
             self._queue_storyboard_thumbs(pending, token)
 
-    def _make_storyboard_card(self, index, item, start, seconds):
+    def _make_storyboard_card(self, index, item, start, seconds, parent=None,
+                              pack=True):
         selected = index in getattr(self, "selected_indices", set())
-        card = tk.Frame(self.storyboard_inner, bg=P["raised"], width=132, height=100,
-                        highlightthickness=2,
+        card = tk.Frame(parent or self.storyboard_inner, bg=P["raised"],
+                        width=132, height=100, highlightthickness=2,
                         highlightbackground=(P["accent"] if selected else P["border"]),
                         cursor="hand2")
-        card.pack(side="left", padx=4, pady=7)
+        if pack:
+            card.pack(side="left", padx=4, pady=7)
         card.pack_propagate(False)
         holder = tk.Frame(card, bg=P["stage"], width=124, height=58)
         holder.pack(padx=3, pady=(3, 1))
@@ -210,19 +244,36 @@ class StoryboardMixin:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _refresh_selection(self):
+        for index, card in enumerate(getattr(self, "_sb_widgets", [])):
+            selected = index in getattr(self, "selected_indices", set())
+            try:
+                card.configure(highlightbackground=(P["accent"] if selected
+                                                    else P["border"]),
+                               highlightthickness=2 if selected else 1)
+            except tk.TclError:
+                pass
+
     def _storyboard_press(self, event, index):
-        if index not in self.selected_indices:
+        self._active_media_panel = "project"
+        ctrl = bool(event.state & 0x0004)
+        shift = bool(event.state & 0x0001)
+        if ctrl:
+            if index in self.selected_indices:
+                self.selected_indices.discard(index)
+            else:
+                self.selected_indices.add(index)
+            self._sb_anchor = index
+        elif shift and self._sb_anchor is not None:
+            a, b = sorted((self._sb_anchor, index))
+            self.selected_indices = set(range(a, b + 1))
+        else:
             self.selected_indices = {index}
-            self._sel_anchor = index
-            self._refresh_selection()
-            for i, card in enumerate(self._sb_widgets):
-                try:
-                    card.configure(highlightbackground=(P["accent"] if i == index
-                                                        else P["border"]),
-                                   highlightthickness=2 if i == index else 1)
-                except tk.TclError:
-                    pass
-        self._sb_drag = {"idx": index, "x": event.x_root, "moved": False}
+            self._sb_anchor = index
+        self._sel_anchor = min(self.selected_indices) if self.selected_indices else None
+        self._refresh_selection()
+        self._sb_drag = {"idx": index, "x": event.x_root, "moved": False,
+                         "multi": ctrl or shift}
 
     def _storyboard_motion(self, event, index):
         drag = getattr(self, "_sb_drag", None)
@@ -246,7 +297,12 @@ class StoryboardMixin:
         if not drag:
             return
         if not drag["moved"]:
-            self.select_scene(index, preview=True)
+            if drag.get("multi"):
+                self._refresh_stage()
+                self._render_inspector()
+                self._schedule_preview(120)
+            else:
+                self.select_scene(index, preview=True)
             return
         target = self._storyboard_index_at(event.x_root, event.y_root)
         if target is None or target == index:

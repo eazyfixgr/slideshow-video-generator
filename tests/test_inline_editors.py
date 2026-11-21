@@ -208,6 +208,7 @@ class InlineEditorTests(unittest.TestCase):
         self.app._set_caption_strategy("by_type")
         self.assertEqual(len(self.widgets(tk.Text)), 3)
         for widget, text in zip(self.widgets(tk.Text)[:2], ("Photo caption", "Video caption")):
+            widget.delete("1.0", "end")
             widget.insert("1.0", text)
         self.root.update()
         self.app._commit_pending_caption_apply()
@@ -327,6 +328,50 @@ class InlineEditorTests(unittest.TestCase):
         self.root.update()
         for expected, actual in zip(second_widths, self.pane_widths()):
             self.assertAlmostEqual(expected, actual, delta=3)
+
+
+    def test_available_media_stay_out_of_project_until_added(self):
+        self.app.library_media = []
+        self.app._append_library_paths([str(self.directory / "one.png"),
+                                        str(self.directory / "two.png")])
+        self.assertEqual(len(self.app.library_media), 2)
+        self.assertEqual(len(self.app.media_files), 2)
+        self.app.library_selected_indices = {0, 1}
+        self.app.add_library_to_project(self.app._selected_library())
+        self.assertEqual(len(self.app.library_media), 2)
+        self.assertEqual(len(self.app.media_files), 4)
+        first_group = self.app.media_files[2][2].get("group_id")
+        self.assertTrue(first_group)
+        self.assertEqual(first_group, self.app.media_files[3][2].get("group_id"))
+        self.app.add_library_to_project([0])
+        self.assertEqual(len(self.app.media_files), 5)
+        self.assertFalse(self.app.media_files[4][2].get("group_id"))
+
+    def test_deleting_available_media_keeps_project_copies(self):
+        self.app.library_media = []
+        self.app._append_library_paths([str(self.directory / "one.png")])
+        self.app.library_selected_indices = {0}
+        self.app.add_library_to_project([0])
+        project_count = len(self.app.media_files)
+        self.app.library_selected_indices = {0}
+        self.app.delete_library_selected()
+        self.assertEqual(len(self.app.library_media), 0)
+        self.assertEqual(len(self.app.media_files), project_count)
+
+    def test_caption_strategy_fills_empty_targets_from_existing_text(self):
+        self.app.project_caption_mode = "all"
+        self.app.project_text_all = "Shared **bold** ##accent##"
+        for _kind, _path, edit in self.app.media_files:
+            edit["presentation"]["mode"] = "global"
+        self.app._set_caption_strategy("individual")
+        for _kind, _path, edit in self.app.media_files:
+            self.assertEqual(edit["presentation"]["mode"], "custom")
+            self.assertEqual(edit["presentation"]["description"],
+                             "Shared **bold** ##accent##")
+        self.app.project_caption_mode = "individual"
+        self.app.project_text_all = ""
+        self.app._set_caption_strategy("all")
+        self.assertEqual(self.app.project_text_all, "Shared **bold** ##accent##")
 
 
 if __name__ == "__main__":

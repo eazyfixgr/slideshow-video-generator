@@ -22,18 +22,85 @@ CAPTION_FIELDS = {
 
 
 class CaptionInspectorMixin:
+    def _caption_text_from_item(self, item):
+        kind, _path, edit = item
+        value = normalize_presentation(edit.get("presentation"))
+        if value["mode"] in ("custom", "combine"):
+            parts = [value[key] for key in ("title", "subtitle", "description")
+                     if value[key]]
+            if parts:
+                return "\n".join(parts)
+        return legacy_text(value, self.get_text_for(kind))
+
+    def _caption_source_text(self, old_mode, media_type=None):
+        _index, selected = self._selected_item()
+        candidates = []
+        if selected is not None and media_type in (None, selected[0]):
+            candidates.append(selected)
+        candidates.extend(item for item in self.media_files
+                          if media_type is None or item[0] == media_type)
+        for item in candidates:
+            text = self._caption_text_from_item(item).strip()
+            if text:
+                return text
+        if old_mode == "all":
+            return (self.project_text_all or "").strip()
+        if media_type == "video":
+            return (self.project_text_videos or "").strip()
+        if media_type == "image":
+            return (self.project_text_photos or "").strip()
+        return ((self.project_text_all or self.project_text_photos or
+                 self.project_text_videos) or "").strip()
+
     def _set_caption_strategy(self, strategy):
         self._commit_pending_caption_apply()
         if strategy not in CAPTION_STRATEGIES.values() or strategy == self.project_caption_mode:
             return
+        old = self.project_caption_mode
+        old_all = self.project_text_all
+        old_photos = self.project_text_photos
+        old_videos = self.project_text_videos
+        generic = self._caption_source_text(old)
+        selected_text = self._caption_source_text(old, None)
         self.push_undo()
+
         if strategy == "individual":
             for kind, _path, edit in self.media_files:
                 value = normalize_presentation(edit.get("presentation"))
+                source = (old_all if old == "all" else
+                          old_videos if kind == "video" else old_photos)
+                source = (source or generic or "").strip()
                 if value["mode"] == "global":
-                    value.update(mode="custom", description=self.get_text_for(kind))
-                    value.update(title="", subtitle="")
+                    value.update(mode="custom", description=source,
+                                 title="", subtitle="")
                     edit["presentation"] = value
+                elif not (value["title"] or value["subtitle"] or
+                          value["description"]).strip():
+                    value["description"] = source
+                    edit["presentation"] = value
+        elif strategy == "all":
+            if not (self.project_text_all or "").strip():
+                if old == "individual":
+                    self.project_text_all = selected_text
+                elif old == "by_type":
+                    _index, selected = self._selected_item()
+                    if not self.selected_indices:
+                        selected = None
+                    chosen = (old_videos if selected is not None and selected[0] == "video"
+                              else old_photos if selected is not None and selected[0] == "image"
+                              else old_videos or old_photos)
+                    self.project_text_all = (chosen or generic).strip()
+        elif strategy == "by_type" and old == "all":
+            if not (self.project_text_photos or "").strip():
+                self.project_text_photos = old_all
+            if not (self.project_text_videos or "").strip():
+                self.project_text_videos = old_all
+        elif strategy == "by_type" and old == "individual":
+            if not (self.project_text_photos or "").strip():
+                self.project_text_photos = self._caption_source_text(old, "image")
+            if not (self.project_text_videos or "").strip():
+                self.project_text_videos = self._caption_source_text(old, "video")
+
         self.project_caption_mode = strategy
         self._inline_refresh()
         self._render_inspector()

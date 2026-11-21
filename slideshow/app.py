@@ -120,6 +120,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.project_caption_mode = "all"
         self.project_text_all = ""
         self.media_files = []
+        self.library_media = []
         self.is_modified = False
         self.thumbnails = []
         self.view_mode = tk.StringVar(value="thumbnails")
@@ -132,8 +133,11 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self._export_proc = None
         self._video_frame_cache = {}  # first-frame per video path (rotation-corrected)
         self._video_dur_cache = {}    # duration per video path (library display)
-        self.selected_indices = set()  # library selection (Ctrl/Shift for many)
+        self.selected_indices = set()  # project/storyboard selection
+        self.library_selected_indices = set()  # available-media selection
         self._sel_anchor = None
+        self._library_anchor = None
+        self._active_media_panel = "project"
         self._undo_stack = []
         self._redo_stack = []
         self.project_watermark = {
@@ -259,7 +263,10 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
     def _on_delete_key(self, event):
         if self._is_text_widget(self.root.focus_get()):
             return None
-        self.delete_selected()
+        if getattr(self, "_active_media_panel", "project") == "library":
+            self.delete_library_selected()
+        else:
+            self.delete_selected()
         return "break"
 
 
@@ -466,7 +473,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
             stop_play()
         self.current_project = None
         self.media_files = []
+        self.library_media = []
         self.selected_indices = set()
+        self.library_selected_indices = set()
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.is_modified = False
@@ -836,6 +845,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.name_var.set("")
         self.out_var.set(self.settings.get("output_folder", ""))
         self.media_files = []
+        self.library_media = []
         self.project_template_override = False
         self.project_template_name = self._default_template_name()
         self.project_template = template_base(self.project_template_name,
@@ -855,6 +865,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.selected_indices = set()
+        self.library_selected_indices = set()
         self.is_modified = False
         self.update_media_display()
         self._refresh_inspector_after_media(force=True)
@@ -908,6 +919,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         data = {
             "name": n,
             "media_files": self.media_files,
+            "library_media": self.library_media,
             "text": (self.project_text_all if self.project_caption_mode == "all"
                      else self.project_text_videos),
             "text_videos": self.project_text_videos,
@@ -1159,6 +1171,12 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.name_var.set(data.get("name", ""))
         self.media_files = self.normalize_media_list(
             data.get("media_files", data.get("media", [])))
+        raw_library = data.get("library_media")
+        if raw_library is None:
+            raw_library = data.get("media_files", data.get("media", []))
+        self.library_media = [
+            self._new_item(kind, path) for kind, path, _edit in
+            self.normalize_media_list(raw_library)]
         self._migrate_image_exif()
         if not had_project_template:
             # Previous releases wrote "legacy" for the default appearance.
@@ -1179,6 +1197,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.selected_indices = set()
+        self.library_selected_indices = set()
         missing_media = self._resolve_existing_project_media(project_path)
         self.current_project = path
         self.set_last_project(path)

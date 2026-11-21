@@ -1,13 +1,15 @@
-"""The media library: adding/removing/reordering items and their badges.
+"""The available-media library: import, select, delete and add to the project.
 
-Supports single and multi selection (Ctrl/Shift + click), drag & drop reorder,
-video duration + file name tooltips, and Undo/Redo for structural changes.
+Imported files stay here until the user adds them to the project timeline.
+Supports Ctrl/Shift selection, delete/undo, duplicate additions and the
+group frame metadata used by the storyboard.
 """
 
 import copy
 import os
 import re
 import threading
+import uuid
 from pathlib import Path
 
 import tkinter as tk
@@ -25,6 +27,7 @@ class LibraryMixin:
     # ----------------------------------------------------------- undo/redo
     def _editor_snapshot(self):
         return copy.deepcopy({"media": self.media_files,
+                              "library": self.library_media,
                               "caption_mode": self.project_caption_mode,
                               "all": self.project_text_all,
                               "photos": self.project_text_photos,
@@ -33,6 +36,7 @@ class LibraryMixin:
 
     def _restore_editor_snapshot(self, snapshot):
         self.media_files = snapshot["media"]
+        self.library_media = snapshot.get("library", [])
         self.project_caption_mode = snapshot["caption_mode"]
         self.project_text_all = snapshot["all"]
         self.project_text_photos = snapshot["photos"]
@@ -53,6 +57,7 @@ class LibraryMixin:
         self._redo_stack.append(self._editor_snapshot())
         self._restore_editor_snapshot(self._undo_stack.pop())
         self.selected_indices = set()
+        self.library_selected_indices = set()
         self.is_modified = True
         self.update_media_display()
         self._refresh_inspector_after_media()
@@ -64,13 +69,34 @@ class LibraryMixin:
         self._undo_stack.append(self._editor_snapshot())
         self._restore_editor_snapshot(self._redo_stack.pop())
         self.selected_indices = set()
+        self.library_selected_indices = set()
         self.is_modified = True
         self.update_media_display()
         self._refresh_inspector_after_media()
 
     # ------------------------------------------------------------ adding
+    def _append_library_paths(self, files):
+        first = len(self.library_media)
+        added = False
+        for f in files:
+            path = str(f).strip('{} ')
+            ext = Path(path).suffix.lower()
+            if ext in ('.mp4', '.avi', '.mov', '.mkv'):
+                self.library_media.append(self._new_item("video", path))
+                added = True
+            elif ext in ('.jpg', '.jpeg', '.png', '.bmp'):
+                self.library_media.append(self._new_item("image", path))
+                added = True
+        if added:
+            self.library_selected_indices = set(
+                range(first, len(self.library_media)))
+            self._library_anchor = first
+            self._active_media_panel = "library"
+            self.is_modified = True
+            self.update_media_display()
+
     def import_media(self):
-        """File → Import Media...: pick any mix of photos and videos at once."""
+        """File → Import Media...: add files to the available-media library."""
         fs = filedialog.askopenfilenames(
             title="Import Media",
             filetypes=[("Media (φωτογραφίες & βίντεο)",
@@ -78,134 +104,102 @@ class LibraryMixin:
                        ("Video", "*.mp4 *.avi *.mov *.mkv"),
                        ("Image", "*.jpg *.jpeg *.png *.bmp"),
                        ("All files", "*.*")])
-        added = False
-        for f in fs:
-            ext = Path(f).suffix.lower()
-            if ext in ('.mp4', '.avi', '.mov', '.mkv'):
-                self.media_files.append(self._new_item("video", f))
-                added = True
-            elif ext in ('.jpg', '.jpeg', '.png', '.bmp'):
-                self.media_files.append(self._new_item("image", f))
-                added = True
-        if added:
-            self.is_modified = True
-            self.update_media_display()
+        if fs:
+            self._append_library_paths(fs)
 
     def handle_drop(self, data):
         files = re.findall(r'\{([^}]*)\}', data) if '{' in data else data.split()
-        added = False
-        for f in files:
-            f = f.strip('{} ')
-            ext = Path(f).suffix.lower()
-            if ext in ('.mp4', '.avi', '.mov', '.mkv'):
-                self.media_files.append(self._new_item("video", f))
-                added = True
-            elif ext in ('.jpg', '.jpeg', '.png', '.bmp'):
-                self.media_files.append(self._new_item("image", f))
-                added = True
-        if added:
-            self.is_modified = True
-            self.update_media_display()
+        if files:
+            self._append_library_paths(files)
 
     def add_videos(self):
         fs = filedialog.askopenfilenames(filetypes=[("Video", "*.mp4 *.avi *.mov *.mkv")])
         if fs:
-            for f in fs:
-                self.media_files.append(self._new_item("video", f))
-            self.is_modified = True
-            self.update_media_display()
+            self._append_library_paths(fs)
 
     def add_images(self):
         fs = filedialog.askopenfilenames(filetypes=[("Image", "*.jpg *.jpeg *.png *.bmp")])
         if fs:
-            for f in fs:
-                self.media_files.append(self._new_item("image", f))
-            self.is_modified = True
-            self.update_media_display()
+            self._append_library_paths(fs)
 
     def clear_media(self):
         self._commit_pending_caption_apply()
-        if self.media_files and not messagebox.askyesno(
+        if self.library_media and not messagebox.askyesno(
                 "Καθαρισμός", "Να αδειάσει όλη η βιβλιοθήκη;\n\n(Μπορείς να το αναιρέσεις με Undo)"):
             return
         self.push_undo()
-        self.media_files = []
-        self.selected_indices = set()
+        self.library_media = []
+        self.library_selected_indices = set()
         self.is_modified = True
         self.update_media_display()
-        self._refresh_inspector_after_media()
 
     # ---------------------------------------------------------- selection
     def _selected(self):
         return sorted(i for i in self.selected_indices if 0 <= i < len(self.media_files))
 
+    def _selected_library(self):
+        return sorted(i for i in self.library_selected_indices
+                      if 0 <= i < len(self.library_media))
+
     def _select_click(self, idx, event):
         self._commit_pending_caption_apply()
+        self._active_media_panel = "library"
         ctrl = bool(event.state & 0x0004)
         shift = bool(event.state & 0x0001)
         if ctrl:
-            if idx in self.selected_indices:
-                self.selected_indices.discard(idx)
+            if idx in self.library_selected_indices:
+                self.library_selected_indices.discard(idx)
             else:
-                self.selected_indices.add(idx)
-            self._sel_anchor = idx
-        elif shift and self._sel_anchor is not None:
-            a, b = sorted((self._sel_anchor, idx))
-            self.selected_indices = set(range(a, b + 1))
+                self.library_selected_indices.add(idx)
+            self._library_anchor = idx
+        elif shift and self._library_anchor is not None:
+            a, b = sorted((self._library_anchor, idx))
+            self.library_selected_indices = set(range(a, b + 1))
         else:
-            self.selected_indices = {idx}
-            self._sel_anchor = idx
-        self._refresh_selection()
-        changed = getattr(self, "_selection_changed", None)
-        if changed:
-            changed()
+            self.library_selected_indices = {idx}
+            self._library_anchor = idx
+        self._refresh_library_selection()
 
-    def _refresh_selection(self):
-        mode = self.view_mode.get()
+    def _refresh_library_selection(self):
         indices = getattr(self, "_widget_indices", list(range(
             len(getattr(self, "_item_widgets", [])))))
         for position, w in enumerate(getattr(self, "_item_widgets", [])):
             index = indices[position] if position < len(indices) else position
-            sel = index in self.selected_indices
+            sel = index in self.library_selected_indices
             try:
-                if mode == "list":
-                    w.config(bg=(P["selected"] if sel else P["raised"]),
-                             fg=P["text"])
-                else:
-                    w.config(highlightbackground=(P["accent"] if sel else P["border"]),
-                             highlightthickness=2 if sel else 1)
+                w.config(highlightbackground=(P["accent"] if sel else P["border"]),
+                         highlightthickness=2 if sel else 1)
             except tk.TclError:
                 pass
 
     # ------------------------------------------------------------ display
     def update_media_display(self):
-        self.selected_indices = {i for i in self.selected_indices
-                                 if 0 <= i < len(self.media_files)}
+        self.library_selected_indices = {
+            i for i in self.library_selected_indices
+            if 0 <= i < len(self.library_media)}
         for w in self.thumb_frame.winfo_children():
             w.destroy()
         self.thumbnails = []
         self._item_widgets = []
         filter_value = (self.library_filter_var.get()
                         if hasattr(self, "library_filter_var") else "all")
-        visible = [(i, item) for i, item in enumerate(self.media_files)
+        visible = [(i, item) for i, item in enumerate(self.library_media)
                    if filter_value == "all" or item[0] == filter_value]
         self._widget_indices = [i for i, _item in visible]
-        if self.view_mode.get() == "list":
-            self._build_list(visible)
-        else:
-            self._build_icons(visible)
-        self._refresh_selection()
+        self._build_icons(visible)
+        self._refresh_library_selection()
         if not visible:
             empty = tk.Frame(self.thumb_frame, bg=P["panel"], padx=10, pady=14)
             empty.pack(fill="x", padx=6, pady=10)
-            if not self.media_files:
-                text = "Η βιβλιοθήκη είναι άδεια.\nΠρόσθεσε φωτογραφίες ή βίντεο."
+            if not self.library_media:
+                text = ("Η βιβλιοθήκη είναι άδεια.\n"
+                        "Πρόσθεσε φωτογραφίες ή βίντεο για να τα προσθέσεις μετά στο project.")
             else:
-                text = "Δεν υπάρχουν στοιχεία σε αυτό το φίλτρο."
+                text = "Δεν υπάρχουν διαθέσιμα media σε αυτό το φίλτρο."
             tk.Label(empty, text=text, bg=P["panel"], fg=P["muted"],
                      font=("Segoe UI", 9), justify="left", anchor="w",
                      wraplength=200).pack(anchor="w")
-            if not self.media_files:
+            if not self.library_media:
                 tk.Button(empty, text="+  Προσθήκη media", command=self.import_media,
                           bg=P["accent"], fg=P["accent_text"], activebackground=P["accent"],
                           activeforeground=P["accent_text"], relief="flat", bd=0,
@@ -213,9 +207,9 @@ class LibraryMixin:
                           cursor="hand2").pack(anchor="w", pady=(8, 0))
         count_var = getattr(self, "library_count_var", None)
         if count_var is not None:
-            total = len(self.media_files)
+            total = len(self.library_media)
             count_var.set(f"{len(visible)} / {total}" if filter_value != "all"
-                          else f"{total} {'σκηνή' if total == 1 else 'σκηνές'}")
+                          else f"{total} {'διαθέσιμο' if total == 1 else 'διαθέσιμα'}")
         self._schedule_preview()
         refresh_estimate = getattr(self, "_refresh_export_estimate", None)
         if refresh_estimate:
@@ -376,15 +370,12 @@ class LibraryMixin:
 
     def _bind_item(self, w, idx):
         w.bind("<Button-1>", lambda e, i=idx: self._on_item_press(e, i))
-        w.bind("<B1-Motion>", lambda e, i=idx: self._on_item_motion(e, i))
-        w.bind("<ButtonRelease-1>", lambda e, i=idx: self._on_item_release(e, i))
-        w.bind("<Double-Button-1>", lambda e, i=idx: self.open_edit_dialog(i))
-        w.bind("<Button-3>", lambda e, i=idx: self.media_menu(e, i))
+        w.bind("<Double-Button-1>", lambda e, i=idx: self.add_library_to_project([i]))
+        w.bind("<Button-3>", lambda e, i=idx: self.library_menu(e, i))
 
     def _on_item_press(self, event, idx):
-        if idx not in self.selected_indices or (event.state & 0x0004):
+        if idx not in self.library_selected_indices or (event.state & 0x0004):
             self._select_click(idx, event)
-        self._drag = {"idx": idx, "x0": event.x_root, "y0": event.y_root, "moved": False}
 
     def _on_item_motion(self, event, idx):
         d = getattr(self, "_drag", None)
@@ -489,8 +480,108 @@ class LibraryMixin:
         widget.bind("<Leave>", hide, add="+")
         widget.bind("<ButtonPress>", hide, add="+")
 
+    # --------------------------------------------------------- available media
+    def add_library_to_project(self, indices=None):
+        self._commit_pending_caption_apply()
+        if indices is None:
+            indices = list(range(len(self.library_media)))
+        indices = sorted({i for i in indices if 0 <= i < len(self.library_media)})
+        if not indices:
+            messagebox.showinfo("Προσθήκη στο project",
+                                "Διάλεξε πρώτα media από τη βιβλιοθήκη.")
+            return
+        self.push_undo()
+        start = len(self.media_files)
+        group_id = uuid.uuid4().hex if len(indices) > 1 else ""
+        for index in indices:
+            kind, path, _edit = self.library_media[index]
+            _kind, _path, copied = self._new_item(kind, path)
+            if group_id:
+                copied["group_id"] = group_id
+            self.media_files.append((kind, path, copied))
+        self.selected_indices = set(range(start, len(self.media_files)))
+        self._sel_anchor = start if self.selected_indices else None
+        self._active_media_panel = "project"
+        self.is_modified = True
+        self.update_media_display()
+        self._refresh_inspector_after_media()
+        self._schedule_preview(120)
+
+    def add_all_library_to_project(self):
+        self.add_library_to_project(None)
+
+    def group_selected_media(self):
+        sel = self._selected()
+        if len(sel) < 2:
+            messagebox.showinfo("Ομαδοποίηση", "Διάλεξε τουλάχιστον 2 σκηνές.")
+            return
+        if sel != list(range(sel[0], sel[-1] + 1)):
+            messagebox.showinfo("Ομαδοποίηση",
+                                "Για ένα ενιαίο πλαίσιο επίλεξε συνεχόμενες σκηνές.")
+            return
+        self.push_undo()
+        group_id = uuid.uuid4().hex
+        number = sum(1 for _kind, _path, edit in self.media_files
+                     if edit.get("group_id")) + 1
+        for index in sel:
+            edit = self.media_files[index][2]
+            edit["group_id"] = group_id
+            edit["group_name"] = f"Ομάδα {number}"
+        self.is_modified = True
+        self.update_media_display()
+
+    def ungroup_selected_media(self):
+        sel = self._selected()
+        if not sel:
+            return
+        group_ids = {self.media_files[index][2].get("group_id")
+                     for index in sel if self.media_files[index][2].get("group_id")}
+        if not group_ids:
+            return
+        self.push_undo()
+        for _kind, _path, edit in self.media_files:
+            if edit.get("group_id") in group_ids:
+                edit.pop("group_id", None)
+                edit.pop("group_name", None)
+        self.is_modified = True
+        self.update_media_display()
+
+    def library_menu(self, event, idx):
+        self._active_media_panel = "library"
+        if idx not in self.library_selected_indices:
+            self.library_selected_indices = {idx}
+            self._library_anchor = idx
+            self._refresh_library_selection()
+        n = len(self._selected_library())
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(
+            label=("Προσθήκη στο project" if n == 1
+                   else f"Προσθήκη {n} media στο project"),
+            command=lambda: self.add_library_to_project(self._selected_library()))
+        menu.add_separator()
+        menu.add_command(
+            label="Delete από τη βιβλιοθήκη" if n == 1 else f"Delete ({n})",
+            command=self.delete_library_selected)
+        menu.add_command(label="Undo", command=self.undo)
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def delete_library_selected(self):
+        self._active_media_panel = "library"
+        sel = self._selected_library()
+        if not sel:
+            messagebox.showinfo("Διαγραφή", "Διάλεξε πρώτα media από τη βιβλιοθήκη.")
+            return
+        self.push_undo()
+        keep = set(sel)
+        self.library_media = [item for i, item in enumerate(self.library_media)
+                              if i not in keep]
+        self.library_selected_indices = set()
+        self.is_modified = True
+        self.update_media_display()
+
     # -------------------------------------------------------------- menu
     def media_menu(self, event, idx):
+        self._active_media_panel = "project"
         if idx not in self.selected_indices:
             self.selected_indices = {idx}
             self._sel_anchor = idx
@@ -506,15 +597,20 @@ class LibraryMixin:
         m.add_command(label="Delete" if n == 1 else f"Delete ({n} επιλεγμένα)",
                       command=self.delete_selected)
         m.add_command(label="Change Position", command=lambda: self.change_pos(idx))
-        m.add_separator()
-        m.add_command(label="Move Left/Up", command=lambda: self.move_media(idx, -1))
-        m.add_command(label="Move Right/Down", command=lambda: self.move_media(idx, 1))
+        if n > 1:
+            m.add_command(label="Ομαδοποίηση επιλεγμένων",
+                          command=self.group_selected_media)
+        if any(self.media_files[i][2].get("group_id")
+               for i in self._selected()):
+            m.add_command(label="Άρση ομαδοποίησης",
+                          command=self.ungroup_selected_media)
         m.add_separator()
         m.add_command(label="Undo", command=self.undo)
         m.tk_popup(event.x_root, event.y_root)
 
     # ------------------------------------------------------------ editing
     def delete_selected(self):
+        self._active_media_panel = "project"
         self._commit_pending_caption_apply()
         sel = self._selected()
         if not sel:

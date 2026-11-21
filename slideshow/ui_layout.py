@@ -225,19 +225,11 @@ class LayoutMixin(WorkspaceLayoutMixin):
 
         footer = tk.Frame(parent, bg=P["panel"])
         footer.grid(row=3, column=0, sticky="ew", padx=10, pady=(2, 8))
-        self.list_view_btn = flat_button(footer, "Λίστα", self._set_list_view,
-                                         background=P["panel"], foreground=P["muted"],
-                                         active_background=P["selected"],
-                                         font=("Segoe UI", 8), padx=6, pady=2)
-        self.list_view_btn.pack(side="right")
-        self.grid_view_btn = flat_button(footer, "Πλέγμα", self._set_grid_view,
-                                         background=P["panel"], foreground=P["muted"],
-                                         active_background=P["selected"],
-                                         font=("Segoe UI", 8), padx=6, pady=2)
-        self.grid_view_btn.pack(side="right", padx=(0, 2))
-        tk.Label(footer, text="Σύρε για αναδιάταξη", bg=P["panel"], fg=P["muted"],
+        primary_button(footer, "Προσθήκη όλα", self.add_all_library_to_project,
+                       font=("Segoe UI", 8, "bold"), padx=10, pady=4).pack(
+            side="right")
+        tk.Label(footer, text="Ctrl/Shift για πολλά", bg=P["panel"], fg=P["muted"],
                  font=("Segoe UI", 7)).pack(side="left")
-        self._update_library_view_buttons()
 
         if TKDND_AVAILABLE:
             for target in (self.media_canvas, self.thumb_frame):

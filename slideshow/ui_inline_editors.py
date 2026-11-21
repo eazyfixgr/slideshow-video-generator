@@ -371,38 +371,6 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         self._inline_label(body)
         body.winfo_children()[-1].configure(textvariable=status)
 
-        # A per-slide badge/logo remains useful and does not belong to templates.
-        advanced = ttk.LabelFrame(body, text="Badge / Λογότυπο", padding=5)
-        advanced.pack(fill="x", pady=(10, 2))
-        featured = tk.BooleanVar(value=bool(draft.get("featured_enabled")))
-        logo = tk.BooleanVar(value=bool(draft.get("logo_enabled")))
-        featured_text = tk.StringVar(value=str(draft.get("featured_text", "")))
-        logo_path = tk.StringVar(value=str(draft.get("logo_path", "")))
-        tk.Checkbutton(advanced, text="Εμφάνιση badge", variable=featured,
-                       indicatoron=False, bg=P["raised"], fg=P["text"],
-                       selectcolor=P["accent_faint"], activebackground=P["selected"],
-                       activeforeground=P["text"], relief="flat", bd=0, anchor="w",
-                       padx=8, pady=4, font=("Segoe UI", 8)).pack(fill="x")
-        ttk.Entry(advanced, textvariable=featured_text).pack(fill="x", pady=(2, 4))
-        tk.Checkbutton(advanced, text="Εμφάνιση λογοτύπου", variable=logo,
-                       indicatoron=False, bg=P["raised"], fg=P["text"],
-                       selectcolor=P["accent_faint"], activebackground=P["selected"],
-                       activeforeground=P["text"], relief="flat", bd=0, anchor="w",
-                       padx=8, pady=4, font=("Segoe UI", 8)).pack(fill="x")
-        path_row = tk.Frame(advanced)
-        path_row.pack(fill="x", pady=(2, 0))
-        ttk.Entry(path_row, textvariable=logo_path).pack(side="left", fill="x", expand=True)
-
-        def browse_logo():
-            path = filedialog.askopenfilename(
-                parent=self.root, filetypes=[("Logo", "*.png *.jpg *.jpeg")])
-            if path:
-                logo_path.set(path)
-        ttk.Button(path_row, text="…", width=3, command=browse_logo).pack(side="left")
-        ttk.Button(advanced, text="Εφαρμογή badge/logo",
-                   command=lambda: self._apply_design_extra(
-                       targets, featured.get(), featured_text.get(),
-                       logo.get(), logo_path.get())).pack(fill="x", pady=(4, 0))
         dirty["loading"] = False
 
     def _reset_design_scope(self, scope, targets, project_scope):
@@ -430,14 +398,4 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         self._inline_refresh()
         self._render_inspector()
 
-    def _apply_design_extra(self, targets, featured, featured_text, logo, logo_path):
-        self.push_undo()
-        for target in targets:
-            current = normalize_presentation(target[2].get("presentation"))
-            current["featured_enabled"] = bool(featured)
-            current["featured_text"] = str(featured_text or "")
-            current["logo_enabled"] = bool(logo)
-            current["logo_path"] = str(logo_path or "")
-            target[2]["presentation"] = current
-        self.is_modified = True
-        self._inline_refresh()
+
