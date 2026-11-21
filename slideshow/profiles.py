@@ -33,7 +33,7 @@ def initials(name, fallback="Π"):
     return letters or fallback
 
 
-def _default_profile():
+def _default_profile(onboarded=False):
     return {
         "id": "main",
         "name": DEFAULT_PROFILE_NAME,
@@ -42,6 +42,7 @@ def _default_profile():
         "legacy": True,
         "created_at": _now(),
         "last_project": "",
+        "onboarded": bool(onboarded),
     }
 
 
@@ -49,7 +50,7 @@ def registry_path(app_dir):
     return Path(app_dir) / REGISTRY_NAME
 
 
-def _sanitize_profile(profile):
+def _sanitize_profile(profile, legacy_data=False):
     if not isinstance(profile, dict):
         return None
     profile_id = profile.get("id")
@@ -63,6 +64,10 @@ def _sanitize_profile(profile):
     last_project = profile.get("last_project")
     if not isinstance(last_project, str):
         last_project = ""
+    if "onboarded" in profile:
+        onboarded = bool(profile["onboarded"])
+    else:
+        onboarded = bool(legacy_data or name != DEFAULT_PROFILE_NAME)
     return {
         "id": profile_id,
         "name": name,
@@ -71,10 +76,11 @@ def _sanitize_profile(profile):
         "legacy": bool(profile.get("legacy")),
         "created_at": str(profile.get("created_at") or _now()),
         "last_project": last_project,
+        "onboarded": onboarded,
     }
 
 
-def load_registry(app_dir):
+def load_registry(app_dir, legacy_data=False):
     path = registry_path(app_dir)
     data = None
     if path.exists():
@@ -87,11 +93,11 @@ def load_registry(app_dir):
     profiles = []
     if isinstance(data, dict) and isinstance(data.get("profiles"), list):
         for profile in data["profiles"]:
-            cleaned = _sanitize_profile(profile)
+            cleaned = _sanitize_profile(profile, legacy_data=legacy_data)
             if cleaned is not None:
                 profiles.append(cleaned)
     if not profiles:
-        profiles = [_default_profile()]
+        profiles = [_default_profile(onboarded=bool(legacy_data))]
 
     active = data.get("active_profile") if isinstance(data, dict) else None
     if not any(profile["id"] == active for profile in profiles):
@@ -138,7 +144,7 @@ def update_profile(registry, profile_id, **fields):
     profile = get_profile(registry, profile_id)
     if profile is None:
         return False
-    for key in ("name", "role", "color", "last_project"):
+    for key in ("name", "role", "color", "last_project", "onboarded"):
         if key in fields:
             profile[key] = fields[key]
     return True
@@ -194,6 +200,7 @@ def create_profile(registry, app_dir, name, role="", color=None):
         "legacy": False,
         "created_at": _now(),
         "last_project": "",
+        "onboarded": True,
     }
     registry.setdefault("profiles", []).append(profile)
     registry["active_profile"] = profile_id

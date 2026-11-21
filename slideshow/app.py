@@ -88,9 +88,15 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
         self.app_dir = APP_DIR
         self._use_local_ffmpeg()
-        self.profiles_data = load_registry(self.app_dir)
+        legacy_data = ((self.app_dir / "settings.json").exists() or
+                       (self.app_dir / "music_tracker.json").exists() or
+                       any((self.app_dir / "projects").glob("*.json")))
+        self.profiles_data = load_registry(self.app_dir, legacy_data=legacy_data)
         self.active_profile_id = self.profiles_data["active_profile"]
         self.active_profile_data = registry_active_profile(self.profiles_data)
+        self._needs_profile_setup = not bool(
+            self.active_profile_data.get("onboarded", True))
+        self._profile_setup_dialog = None
         self._apply_profile_paths()
         try:
             self._root_hidden_until_welcome = (show_welcome or
@@ -408,6 +414,17 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
     def save_profile_registry(self):
         save_registry(self.app_dir, self.profiles_data)
+
+    def complete_profile_onboarding(self, name, role="", color=None):
+        profile = self.active_profile_data
+        update_profile(self.profiles_data, profile["id"], name=name, role=role,
+                       color=color or profile.get("color"), onboarded=True)
+        self.save_profile_registry()
+        self.active_profile_data = get_profile(
+            self.profiles_data, self.active_profile_id) or profile
+        self._needs_profile_setup = False
+        self._refresh_header()
+        return self.active_profile_data
 
     def switch_profile(self, profile_id):
         """Save the current profile and reopen the app on another workspace."""

@@ -19,28 +19,58 @@ class ProfileDialogsMixin:
         profile = profile or self.active_profile_data
         return self._profile_dialog(profile, on_saved)
 
-    def _profile_dialog(self, profile, callback):
-        editing = profile is not None
+    def show_first_profile_setup(self):
+        existing = getattr(self, "_profile_setup_dialog", None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    return existing
+            except tk.TclError:
+                pass
+
+        def done(_profile):
+            self._profile_setup_dialog = None
+            self._needs_profile_setup = False
+            self.show_welcome_screen()
+
+        def cancel():
+            self._profile_setup_dialog = None
+            self.root.after(10, self.on_closing)
+
+        dialog = self._profile_dialog(None, done, first_run=True, on_cancel=cancel)
+        self._profile_setup_dialog = dialog
+        return dialog
+
+    def _profile_dialog(self, profile, callback, first_run=False, on_cancel=None):
+        editing = profile is not None and not first_run
         owner = getattr(self, "_welcome_dialog", None) or self.root
         dialog = tk.Toplevel(owner)
-        dialog.title("Επεξεργασία προφίλ" if editing else "Νέο προφίλ")
+        dialog.title("Καλώς ήρθες" if first_run else
+                     ("Επεξεργασία προφίλ" if editing else "Νέο προφίλ"))
         dialog.configure(bg=P["background"])
         dialog.geometry("520x430")
         dialog.resizable(False, False)
-        dialog.transient(owner)
+        if not first_run:
+            dialog.transient(owner)
         dialog.grab_set()
 
         body = tk.Frame(dialog, bg=P["background"], padx=24, pady=20)
         body.pack(fill="both", expand=True)
 
-        tk.Label(body, text="ΠΡΟΦΙΛ", bg=P["background"], fg=P["muted"],
+        tk.Label(body, text=("ΚΑΛΩΣ ΗΡΘΕΣ" if first_run else "ΠΡΟΦΙΛ"),
+                 bg=P["background"], fg=P["muted"],
                  font=("Segoe UI", 8, "bold")).pack(anchor="w")
-        tk.Label(body, text=("Επεξεργασία προφίλ" if editing else "Νέο προφίλ"),
-                 bg=P["background"], fg=P["text"],
+        heading = ("Δημιούργησε το προφίλ σου" if first_run else
+                   ("Επεξεργασία προφίλ" if editing else "Νέο προφίλ"))
+        tk.Label(body, text=heading, bg=P["background"], fg=P["text"],
                  font=("Segoe UI", 18, "bold")).pack(anchor="w", pady=(2, 2))
-        tk.Label(body, text="Κάθε προφίλ έχει δικά του projects, ρυθμίσεις και μουσική.",
-                 bg=P["background"], fg=P["muted"], font=("Segoe UI", 9),
-                 wraplength=455, justify="left").pack(anchor="w", pady=(0, 16))
+        description = ("Πώς να σε προσφωνούμε; Το όνομα και το χρώμα θα εμφανίζονται "
+                       "στο welcome screen." if first_run else
+                       "Κάθε προφίλ έχει δικά του projects, ρυθμίσεις και μουσική.")
+        tk.Label(body, text=description, bg=P["background"], fg=P["muted"],
+                 font=("Segoe UI", 9), wraplength=455, justify="left").pack(
+            anchor="w", pady=(0, 16))
 
         preview = tk.Label(body, bg=P["background"])
         preview.pack(anchor="w", pady=(0, 10))
@@ -99,12 +129,15 @@ class ProfileDialogsMixin:
 
         footer = tk.Frame(body, bg=P["background"])
         footer.pack(side="bottom", fill="x", pady=(12, 0))
-        cancel = flat_button(footer, "Ακύρωση", dialog.destroy,
+        submitted = {"value": False}
+        cancel = flat_button(footer, "Έξοδος" if first_run else "Ακύρωση",
+                             lambda: close(),
                              background=P["panel"], foreground=P["muted"],
                              active_background=P["selected"])
         cancel.pack(side="right", padx=(8, 0))
-        save = primary_button(footer, "Αποθήκευση" if editing else "Δημιουργία",
-                              lambda: submit())
+        save_text = ("Δημιουργία προφίλ" if first_run else
+                     ("Αποθήκευση" if editing else "Δημιουργία"))
+        save = primary_button(footer, save_text, lambda: submit())
         save.pack(side="right")
 
         def submit():
@@ -114,7 +147,9 @@ class ProfileDialogsMixin:
                 name_entry.focus_set()
                 return
             role = role_var.get().strip()
-            if editing:
+            if first_run:
+                result = self.complete_profile_onboarding(name, role, state["color"])
+            elif editing:
                 update_profile(self.profiles_data, profile["id"], name=name, role=role,
                                color=state["color"])
                 self.save_profile_registry()
@@ -124,6 +159,7 @@ class ProfileDialogsMixin:
                 result = profile
             else:
                 result = self.create_new_profile(name, role, state["color"])
+            submitted["value"] = True
             close()
             if callback:
                 callback(result)
@@ -135,16 +171,24 @@ class ProfileDialogsMixin:
             except tk.TclError:
                 pass
             dialog.destroy()
+            if not submitted["value"] and on_cancel:
+                on_cancel()
 
         name_var.trace_add("write", refresh_preview)
         choose_color(state["color"])
         dialog.protocol("WM_DELETE_WINDOW", close)
-        dialog.bind("<Escape>", lambda _e: (close(), "break")[1])
+        if not first_run:
+            dialog.bind("<Escape>", lambda _e: (close(), "break")[1])
         dialog.bind("<Return>", lambda _e: (submit(), "break")[1])
         name_entry.focus_set()
         name_entry.selection_range(0, tk.END)
         dialog.update_idletasks()
-        x = owner.winfo_rootx() + max(0, (owner.winfo_width() - dialog.winfo_width()) // 2)
-        y = owner.winfo_rooty() + max(0, (owner.winfo_height() - dialog.winfo_height()) // 3)
+        if first_run:
+            dialog.attributes("-topmost", True)
+            x = max(0, (dialog.winfo_screenwidth() - dialog.winfo_width()) // 2)
+            y = max(0, (dialog.winfo_screenheight() - dialog.winfo_height()) // 2)
+        else:
+            x = owner.winfo_rootx() + max(0, (owner.winfo_width() - dialog.winfo_width()) // 2)
+            y = owner.winfo_rooty() + max(0, (owner.winfo_height() - dialog.winfo_height()) // 3)
         dialog.geometry(f"+{x}+{y}")
         return dialog

@@ -179,6 +179,8 @@ class WelcomeMixin:
 
     # ---------------------------------------------------------- main screen
     def show_welcome_screen(self):
+        if getattr(self, "_needs_profile_setup", False):
+            return self.show_first_profile_setup()
         existing = getattr(self, "_welcome_dialog", None)
         if existing is not None:
             try:

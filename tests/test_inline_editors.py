@@ -96,6 +96,8 @@ class InlineEditorTests(unittest.TestCase):
         self.assertEqual(self.app.media_files, before)
 
     def test_first_welcome_and_profile_restore(self):
+        self.app.complete_profile_onboarding("First profile", "", "#e8bd79")
+        self.assertFalse(self.app._needs_profile_setup)
         self.app.show_welcome_screen()
         self.root.update()
         self.assertEqual(self.root.state(), "withdrawn")
@@ -105,7 +107,7 @@ class InlineEditorTests(unittest.TestCase):
         profile = self.app.create_new_profile("Second profile")
         self.assertEqual(self.app.active_profile_id, profile["id"])
         self.assertEqual(self.root.state(), "withdrawn")
-        data = json.loads((self.directory / "profiles.json").read_text())
+        data = json.loads((self.directory / "profiles.json").read_text(encoding="utf-8"))
         self.assertEqual(data["active_profile"], profile["id"])
 
     def test_embedded_caption_and_design_export(self):
