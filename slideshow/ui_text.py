@@ -346,15 +346,24 @@ class TextInputMixin:
 
 
     def _bind_text_shortcuts(self, txt):
-        """Explicit Ctrl+C / Ctrl+V / Ctrl+X / Ctrl+Z support for the text boxes."""
-        txt.bind("<Control-c>", lambda e: self._do_text_shortcut(txt, "copy"))
-        txt.bind("<Control-C>", lambda e: self._do_text_shortcut(txt, "copy"))
-        txt.bind("<Control-v>", lambda e: self._do_text_shortcut(txt, "paste"))
-        txt.bind("<Control-V>", lambda e: self._do_text_shortcut(txt, "paste"))
-        txt.bind("<Control-x>", lambda e: self._do_text_shortcut(txt, "cut"))
-        txt.bind("<Control-X>", lambda e: self._do_text_shortcut(txt, "cut"))
-        txt.bind("<Control-z>", lambda e: self._do_text_shortcut(txt, "undo"))
-        txt.bind("<Control-Z>", lambda e: self._do_text_shortcut(txt, "undo"))
+        """Ctrl+C/V/X/Z by physical key code, so Greek layouts also work."""
+        txt.bind("<Control-KeyPress>",
+                 lambda event: self._text_control_key(txt, event))
+
+    def _text_control_key(self, txt, event):
+        keycode = getattr(event, "keycode", None)
+        try:
+            keycode = int(keycode)
+        except (TypeError, ValueError):
+            keycode = 0
+        action = {67: "copy", 86: "paste", 88: "cut", 90: "undo"}.get(keycode)
+        if action is None:
+            keysym = str(getattr(event, "keysym", "")).lower()
+            action = {"c": "copy", "v": "paste", "x": "cut",
+                      "z": "undo"}.get(keysym)
+        if action is None:
+            return None
+        return self._do_text_shortcut(txt, action)
 
 
     def _do_text_shortcut(self, txt, action):

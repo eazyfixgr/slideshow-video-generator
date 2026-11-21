@@ -80,7 +80,31 @@ class ThemeMixin:
         if not getattr(self, "_theme_map_bound", False):
             self.root.bind_all("<Map>", self._theme_mapped, add="+")
             self._theme_map_bound = True
+        if not getattr(self.root, "_slideshow_combobox_wheel_locked", False):
+            self.root.bind_class("TCombobox", "<MouseWheel>",
+                                 self._combobox_scroll)
+            self.root._slideshow_combobox_wheel_locked = True
         self._theme_widget_tree(self.root, palette)
+
+    def _combobox_scroll(self, event):
+        """Scroll the panel under the pointer instead of changing the value."""
+        try:
+            delta = int(event.delta)
+        except (TypeError, ValueError):
+            delta = 0
+        units = -1 if delta > 0 else 1 if delta < 0 else 0
+        widget = event.widget
+        while widget is not None:
+            scroll = getattr(widget, "scroll", None)
+            if callable(scroll):
+                try:
+                    if units:
+                        scroll(units)
+                except Exception:
+                    pass
+                return "break"
+            widget = getattr(widget, "master", None)
+        return "break"
 
     @staticmethod
     def _configure_modern_styles(style):
