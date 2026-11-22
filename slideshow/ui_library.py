@@ -42,6 +42,7 @@ class LibraryMixin:
             "photos": self.project_text_photos,
             "videos": self.project_text_videos,
             "instructions": self.project_ai_instructions,
+            "audio": getattr(self, "project_audio", None),
         })
 
     def _restore_editor_snapshot(self, snapshot):
@@ -63,6 +64,8 @@ class LibraryMixin:
         self.project_text_photos = snapshot["photos"]
         self.project_text_videos = snapshot["videos"]
         self.project_ai_instructions = snapshot["instructions"]
+        if snapshot.get("audio") is not None:
+            self.project_audio = copy.deepcopy(snapshot["audio"])
 
     def push_undo(self):
         """Snapshot media and caption strategy before an edit."""
@@ -72,6 +75,7 @@ class LibraryMixin:
         self._redo_stack.clear()
 
     def undo(self):
+        self._stop_preview_play()
         self._commit_pending_caption_apply()
         if not self._undo_stack:
             return
@@ -84,6 +88,7 @@ class LibraryMixin:
         self._refresh_inspector_after_media()
 
     def redo(self):
+        self._stop_preview_play()
         self._commit_pending_caption_apply()
         if not self._redo_stack:
             return

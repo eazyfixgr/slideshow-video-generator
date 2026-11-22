@@ -148,6 +148,10 @@ class UpdatesMixin:
             if getattr(self, "_export_running", False):
                 status.set("Περίμενε να ολοκληρωθεί η εξαγωγή πριν την ενημέρωση.")
                 return
+            if (getattr(self, "_voiceover_recording", False) or
+                    (getattr(self, "_voiceover_state", None) or {}).get("recorder") is not None):
+                status.set("Σταμάτησε την εγγραφή voice-over πριν την ενημέρωση.")
+                return
             if state["prepared"]:
                 downloaded(state["prepared"])
                 return

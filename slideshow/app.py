@@ -41,6 +41,8 @@ from .ui_text import TextInputMixin
 from .ui_ai_text import AITextMixin, DEFAULT_BASE_URL
 from .ui_ai_settings import AISettingsMixin
 from .ui_ai_director import AIDirectorMixin
+from .ui_ai_chat import AIChatMixin
+from .project_io import ProjectIOMixin, PROJECT_SETTING_KEYS
 from .ui_presentation import PresentationMixin
 from .ui_captions import CaptionsMixin
 from .slide_design import normalize_template, normalize_presentation
@@ -64,18 +66,13 @@ if getattr(sys, "frozen", False):
 else:
     APP_DIR = Path(__file__).resolve().parent.parent
 
-PROJECT_SETTING_KEYS = (
-    "resolution", "background_mode", "cropping", "slide_duration",
-    "transition_effect", "transition_duration", "random_transitions",
-    "auto_position_photos",
-)
 PROJECT_RESOLUTIONS = {"1080x1080", "1920x1080", "1080x1920", "1080x1350", "720x1280"}
 PROJECT_BACKGROUNDS = {"white", "black", "blur", "fit_and_move"}
 PROJECT_TRANSITIONS = {"none", "fade", "fadeblack", "fadewhite", "wipeleft", "wiperight",
                        "wipeup", "wipedown", "smoothleft", "smoothright", "random"}
 
 
-class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, StoryboardMixin, MediaRecoveryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, ProfileDialogsMixin, WelcomeMixin, ThemeMixin, SlideshowSettingsMixin, SettingsMixin, InspectorMixin, ExportPanelMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin, AISettingsMixin, AIDirectorMixin):
+class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, StoryboardMixin, MediaRecoveryMixin, EditorsMixin, PhotoEditorMixin, EraseSettingsMixin, TimelineMixin, PresentationMixin, ProfileDialogsMixin, WelcomeMixin, ThemeMixin, SlideshowSettingsMixin, SettingsMixin, InspectorMixin, ExportPanelMixin, LayoutMixin, PreviewMixin, CaptionsMixin, TextInputMixin, AITextMixin, AISettingsMixin, AIDirectorMixin, AIChatMixin, ProjectIOMixin):
     """Composes every mixin above into the one application object."""
 
     def __init__(self, root, show_welcome=True):
@@ -147,6 +144,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
             "size_pct": 15, "opacity": 80
         }
 
+        self._reset_project_extras()
         self.load_settings()
         if ensure_template_settings(
                 self.settings, legacy_font_size=self.settings.get("font_size"),
@@ -278,6 +276,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
             return None
         if getattr(self, "_active_media_panel", "project") == "library":
             self.delete_library_selected()
+        elif getattr(self, "_active_media_panel", "project") == "audio":
+            self.delete_audio_clip()
         else:
             self.delete_selected()
         return "break"
@@ -565,6 +565,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         profile = get_profile(self.profiles_data, profile_id)
         if profile is None:
             return False
+        self._stop_voiceover_capture(save=True)
+        self._stop_preview_play()
         self._remember_workspace_layout()
         try:
             self.save_settings()
@@ -598,6 +600,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.current_project = None
         self.media_files = []
         self.library_media = []
+        self._reset_project_extras()
         self.selected_indices = set()
         self.library_selected_indices = set()
         self._undo_stack.clear()
@@ -647,6 +650,8 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
 
     def return_to_welcome(self):
         """Hide the editor and show the profile / recent-project screen."""
+        self._stop_voiceover_capture(save=True)
+        self._stop_preview_play()
         commit_captions = getattr(self, "_commit_pending_caption_apply", None)
         if commit_captions:
             commit_captions()
@@ -928,7 +933,9 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         if not music_path.exists():
             self.music_tracker["available_music"] = []
         else:
-            self.music_tracker["available_music"] = sorted([str(f.name) for f in music_path.glob("*.mp4")])
+            self.music_tracker["available_music"] = sorted(
+                f.name for f in music_path.iterdir() if f.is_file() and
+                f.suffix.lower() in (".mp4", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma"))
         self.save_music_tracker()
         if not silent:
             messagebox.showinfo("Success", f"Found {len(self.music_tracker['available_music'])} music files")
@@ -961,49 +968,6 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         messagebox.showinfo("Reset", "Music tracker reset. All songs are available again.")
 
 
-    def new_project(self):
-        self._commit_pending_caption_apply()
-        stop_play = getattr(self, "_stop_preview_play", None)
-        if stop_play:
-            stop_play()
-        if hasattr(self, "_global_settings"):
-            for key in PROJECT_SETTING_KEYS:
-                if key in self._global_settings:
-                    self.settings[key] = copy.deepcopy(self._global_settings[key])
-        self._active_project_settings = False
-        self.project_settings = {}
-        self.current_project = None
-        self._active_presentation_scene_id = None
-        self.name_var.set("")
-        self.out_var.set(self.settings.get("output_folder", ""))
-        self.media_files = []
-        self.library_media = []
-        self.project_template_override = False
-        self.project_template_name = self._default_template_name()
-        self.project_template = template_base(self.project_template_name,
-                                              self.template_registry())
-        self._sync_caption_template_dropdown()
-        self.project_caption_mode = "all"
-        self.project_text_all = ""
-        self.project_text_videos = ""
-        self.project_text_photos = ""
-        self.project_ai_instructions = ""
-        self.project_watermark = {
-            "enabled": False, "path": "", "position": "bottom_right",
-            "size_pct": 15, "opacity": 80
-        }
-        self._video_frame_cache.clear()
-        self._video_dur_cache.clear()
-        self._undo_stack.clear()
-        self._redo_stack.clear()
-        self.selected_indices = set()
-        self.library_selected_indices = set()
-        self.is_modified = False
-        self.update_media_display()
-        self._refresh_inspector_after_media(force=True)
-        self._refresh_header()
-
-
     def _migrate_image_exif(self):
         """Remember EXIF orientation for projects saved before auto-rotation."""
         for kind, path, edit in getattr(self, "media_files", []):
@@ -1020,71 +984,6 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
             orientation = self.read_exif_orientation(path)
             if orientation != 1:
                 edit["exif_orientation"] = orientation
-
-    def save_project(self):
-        """Save the project. Returns True when it was saved, False otherwise.
-
-        A project without a name is refused (that used to create a stray
-        ``.json`` file and an empty entry in the Load list) and the name field
-        is focused so the user can fix it.
-        """
-        commit_captions = getattr(self, "_commit_pending_caption_apply", None)
-        if commit_captions:
-            commit_captions()
-        n = self.name_var.get().strip()
-        if not n:
-            messagebox.showwarning(
-                "Λείπει το όνομα",
-                "Γράψε πρώτα ένα όνομα για το project (πεδίο «Project Name», πάνω-δεξιά) "
-                "και μετά πάτα Αποθήκευση.")
-            self._focus_name_entry()
-            return False
-
-        safe = re.sub(r'\W+', '_', n).strip('_')
-        if not safe:
-            messagebox.showwarning(
-                "Μη έγκυρο όνομα",
-                "Το όνομα πρέπει να περιέχει τουλάχιστον ένα γράμμα ή αριθμό.")
-            self._focus_name_entry()
-            return False
-
-        data = {
-            "name": n,
-            "media_files": self.media_files,
-            "library_media": self.library_media,
-            "text": (self.project_text_all if self.project_caption_mode == "all"
-                     else self.project_text_videos),
-            "text_videos": self.project_text_videos,
-            "text_photos": self.project_text_photos,
-            "ai_instructions": self.project_ai_instructions,
-            "out": self.out_var.get(),
-            "project_watermark": self.project_watermark,
-            "project_template": self.project_template,
-            "project_template_name": self.project_template_name,
-            "project_template_override": bool(self.project_template_override),
-            "project_settings": self._capture_project_settings(),
-            "caption_mode": self.project_caption_mode,
-            "caption_strategy_version": 1,
-            "project_text_all": self.project_text_all,
-        }
-        p = self.projects_dir / f"{safe}.json"
-        try:
-            temp_file = p.with_name(p.name + ".tmp")
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            os.replace(temp_file, p)
-        except OSError as e:
-            messagebox.showerror("Σφάλμα", f"Δεν μπόρεσα να αποθηκεύσω το project:\n{e}")
-            return False
-        self.project_settings = copy.deepcopy(data["project_settings"])
-        self._active_project_settings = bool(self.project_settings)
-        self.is_modified = False
-        self.current_project = p
-        self.set_last_project(p)
-        self._refresh_header()
-        messagebox.showinfo("Saved", "Project saved.")
-        return True
-
 
     def _focus_name_entry(self):
         entry = getattr(self, "name_entry", None)
@@ -1252,134 +1151,3 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         lb.bind("<Button-3>", show_context_menu)
         ttk.Button(d, text="Load", command=do_load).pack(pady=5)
         return d
-
-
-    def load_project_file(self, project_path, on_loaded=None):
-        """Load one project directly; used by the welcome screen's recent cards."""
-        self._commit_pending_caption_apply()
-        path = Path(project_path)
-        try:
-            with open(path, "r", encoding="utf-8-sig") as stream:
-                data = json.load(stream)
-            if not isinstance(data, dict):
-                raise ValueError("Το αρχείο δεν είναι έγκυρο project.")
-        except Exception as exc:
-            messagebox.showerror("Load Project",
-                                 f"Δεν μπόρεσα να φορτώσω το project '{path.stem}':\n{exc}")
-            return False
-
-        stop_play = getattr(self, "_stop_preview_play", None)
-        if stop_play:
-            stop_play()
-        if hasattr(self, "_global_settings"):
-            for key in PROJECT_SETTING_KEYS:
-                if key in self._global_settings:
-                    self.settings[key] = copy.deepcopy(self._global_settings[key])
-        self._migrate_global_video_position(data.get("project_settings", {}))
-        had_project_template = "project_template" in data
-        registry = self.template_registry()
-        explicit = data.get("project_template_override")
-        if explicit is None:
-            explicit = (bool(data.get("project_template_name")) or
-                        had_project_template)
-        if explicit:
-            name = str(data.get("project_template_name") or "").strip()
-            if name not in registry:
-                old_base = normalize_template(data.get("project_template", "legacy"),
-                                              "legacy")
-                name = LABEL_FOR_BASE.get(old_base, self._default_template_name(registry))
-            self.project_template_name = name
-            self.project_template = template_base(name, registry)
-            self.project_template_override = True
-        else:
-            self.project_template_override = False
-            self.project_template_name = self._default_template_name(registry)
-            self.project_template = template_base(self.project_template_name, registry)
-        self._sync_caption_template_dropdown()
-        self.project_settings = self._normalize_project_settings(
-            data.get("project_settings", {}))
-        self._active_project_settings = bool(self.project_settings)
-        self.settings.update(self.project_settings)
-        self.name_var.set(data.get("name", ""))
-        self.media_files = self.normalize_media_list(
-            data.get("media_files", data.get("media", [])))
-        raw_library = data.get("library_media")
-        if raw_library is None:
-            raw_library = data.get("media_files", data.get("media", []))
-        self.library_media = []
-        for kind, path, saved_edit in self.normalize_media_list(raw_library):
-            item = self._new_item(kind, path)
-            for key in ("library_id", "ai_description"):
-                if saved_edit.get(key):
-                    item[2][key] = saved_edit[key]
-            self.library_media.append(item)
-        self._ensure_library_ids()
-        self._migrate_image_exif()
-        if not had_project_template:
-            # Previous releases wrote "legacy" for the default appearance.
-            for item in self.media_files:
-                if item[2]["presentation"]["template"] == "legacy":
-                    item[2]["presentation"]["template"] = "project"
-        (self.project_text_videos, self.project_text_photos,
-         self.project_caption_mode, self.project_text_all) = self._project_caption_values(data)
-        self.project_ai_instructions = data.get("ai_instructions", "")
-        self.out_var.set(data.get("out", ""))
-        self.project_watermark = data.get("project_watermark", {
-            "enabled": False, "path": "", "position": "bottom_right",
-            "size_pct": 15, "opacity": 80
-        })
-        self.is_modified = False
-        self._video_frame_cache.clear()
-        self._video_dur_cache.clear()
-        self._undo_stack.clear()
-        self._redo_stack.clear()
-        self.selected_indices = set()
-        self.library_selected_indices = set()
-        missing_media = self._resolve_existing_project_media(project_path)
-        self.current_project = path
-        self.set_last_project(path)
-        self._refresh_header()
-        if missing_media:
-            self._refresh_inspector_after_media(force=True)
-            if on_loaded:
-                on_loaded()
-            self._show_missing_media_recovery(missing_media)
-            return True
-        self.update_media_display()
-        self._refresh_inspector_after_media(force=True)
-        if on_loaded:
-            on_loaded()
-        return True
-
-
-    def on_closing(self):
-        commit_captions = getattr(self, "_commit_pending_caption_apply", None)
-        if commit_captions:
-            commit_captions()
-        self._remember_workspace_layout()
-        self._save_window_state()
-        try:
-            self.save_settings()
-            self.save_music_tracker()
-            self.save_profile_registry()
-        except Exception:
-            pass
-        if not self.is_modified:
-            self.root.destroy()
-            return
-        answer = messagebox.askyesnocancel(
-            "Έξοδος",
-            "Έχεις αποθηκεύσει το project;\n\nΠάτα 'Yes' για να αποθηκεύσεις και να βγεις,\n'No' για να βγεις χωρίς αποθήκευση,\n'Cancel' για να μείνεις."
-        )
-        if answer is None:
-            # Cancel - μην κλείσεις
-            return
-        elif answer:
-            # Yes - αποθήκευσε και κλείσε (αν λείπει όνομα, μείνε ανοιχτό)
-            if not self.save_project():
-                return
-            self.root.destroy()
-        else:
-            # No - κλείσε χωρίς αποθήκευση
-            self.root.destroy()
-

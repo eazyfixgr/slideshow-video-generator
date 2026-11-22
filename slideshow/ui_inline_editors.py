@@ -48,6 +48,7 @@ class InlineEditorsMixin(CaptionInspectorMixin):
         self._caption_apply_job = self.root.after(delay_ms, self._commit_pending_caption_apply)
 
     def _inline_refresh(self):
+        self._stop_preview_play()
         self.is_modified = True
         self._schedule_preview(100)
         self.render_storyboard()

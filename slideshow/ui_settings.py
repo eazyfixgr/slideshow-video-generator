@@ -177,6 +177,7 @@ class SettingsMixin(UpdatesMixin):
         ttk.Checkbutton(body, text="Auto Trim Silence", variable=trim_var).pack(padx=30, anchor='w', pady=5)
         
         def save():
+            self._stop_preview_play()
             self.settings.update({
                 "volume_db": volume_var.get(), "mute_video_audio": mute_var.get(), 
                 "music_folder": folder_var.get(), "crossfade_duration": cf_var.get(), 
@@ -184,6 +185,11 @@ class SettingsMixin(UpdatesMixin):
             })
             self.save_settings()
             self.refresh_music_list(silent=True)
+            if getattr(self, "project_audio", {}).get("mode") == "auto":
+                self.project_audio["tracks"] = []
+                self._automatic_audio_cache = None
+                self._timeline_audio_key = None
+            self.render_storyboard()
             self._schedule_preview()
             dialog.destroy()
         ttk.Button(bottom, text="Save Settings", command=save).pack(side='right')
@@ -399,6 +405,7 @@ class SettingsMixin(UpdatesMixin):
                 chosen_label = tr_effect_var.get()
                 chosen_value = next((val for lbl, val in TRANSITION_EFFECTS if lbl == chosen_label), "fade")
                 selected_randoms = self.settings.get("random_transitions", [])
+            self._stop_preview_play()
             vb, vc = color_ui.values()
             self.settings.update({
                 "resolution": res_var.get(), "background_mode": bg_var.get(),

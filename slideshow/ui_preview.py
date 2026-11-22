@@ -43,6 +43,8 @@ class PreviewMixin:
 
     def _auto_preview(self):
         self._preview_job = None
+        if getattr(self, "_preview_playing", False):
+            return
         if self.media_files:
             self.generate_preview()
 
@@ -117,7 +119,7 @@ class PreviewMixin:
             del canvas.full_image
 
 
-    def _render_design_fitmove_preview(self, img, edit, m_type, w, h, presentation):
+    def _render_design_fitmove_preview(self, img, edit, m_type, w, h, presentation, progress=0.0):
         """First Fit-and-Move frame for design templates, as the export starts."""
         if self._slide_background_mode(presentation) != "fit_and_move":
             return self._render_design_frame(img, edit, m_type, w, h)[0]
@@ -134,13 +136,12 @@ class PreviewMixin:
             return self._render_design_frame(img, edit, m_type, w, h)[0]
         moving = self._render_fit_and_move_frame(
             Image.new("RGB", (max(1, rw), max(1, rh))), fit_move_data,
-            0.0, max(1, rw), max(1, rh))
+            progress, max(1, rw), max(1, rh))
         frame = base.copy()
         frame.paste(moving, (x, y))
         return Image.alpha_composite(frame.convert("RGBA"), overlay).convert("RGB")
 
-    def _render_preview(self, path, m_type, w, h, canvas, edit=None, t_start=0.0,
-                        display_token=None):
+    def _preview_frame_image(self, path, m_type, w, h, edit=None, t_start=0.0, progress=0.0):
         """Render the first frame of the export for this media type (full
         resolution), then downscale only for display. For fit_and_move the
         export picks a random pan direction, so this shows the pan start -
@@ -153,7 +154,7 @@ class PreviewMixin:
             img = self._apply_image_edit(img, edit, path, m_type="image")
             if presentation["template"] != "legacy":
                 frame = self._render_design_fitmove_preview(
-                    img, edit, "image", w, h, presentation)
+                    img, edit, "image", w, h, presentation, progress)
             else:
                 frame = self._fit_image_logic(img, w, h, "image", text=text,
                                               presentation=presentation)
@@ -163,7 +164,7 @@ class PreviewMixin:
                     overlay = self._make_text_overlay(text, w, h,
                                                       align=presentation["text_align"],
                                                       presentation=presentation)
-                    frame = self._render_fit_and_move_frame(frame, fit_move_data, 0.0, w, h, overlay)
+                    frame = self._render_fit_and_move_frame(frame, fit_move_data, progress, w, h, overlay)
                 else:
                     frame = self.render_text_on_image(frame, text, w, h,
                                                       align=presentation["text_align"],
@@ -190,6 +191,11 @@ class PreviewMixin:
                                                       presentation=presentation)
 
         frame = self._apply_watermark_overlay(frame)
+        return frame
+
+    def _render_preview(self, path, m_type, w, h, canvas, edit=None, t_start=0.0,
+                        display_token=None):
+        frame = self._preview_frame_image(path, m_type, w, h, edit, t_start)
         full = frame.copy()
         # Pass the PIL image through after(); PhotoImage must be built in the
         # main thread, not in this worker thread. The display size is chosen

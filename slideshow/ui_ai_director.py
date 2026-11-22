@@ -467,6 +467,12 @@ class AIDirectorMixin:
                                      "με το πλάνο του Director;", parent=plan_dialog):
                     return
                 apply_plan(self, plan)
+                self.project_ai_brief = brief.get("1.0", "end-1c").strip()
+                self.ai_chat_history.extend([
+                    {"role": "user", "content": self.project_ai_brief},
+                    {"role": "assistant", "content": f"Εφάρμοσα το πλάνο «{plan['title']}». "
+                     "Μπορείς να ζητήσεις συμπληρωματικές αλλαγές από το Talk to AI."}])
+                self._refresh_chat_history()
                 plan_dialog.destroy()
                 dialog.destroy()
                 messagebox.showinfo("AI Director",

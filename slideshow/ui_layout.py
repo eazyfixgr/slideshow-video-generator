@@ -58,7 +58,12 @@ class LayoutMixin(WorkspaceLayoutMixin):
         self.ai_director_btn = primary_button(
             center, "AI Director", self.show_ai_director,
             font=("Segoe UI", 10, "bold"), padx=18, pady=7)
-        self.ai_director_btn.pack()
+        self.ai_director_btn.pack(side="left")
+        self.ai_chat_btn = flat_button(
+            center, "Talk to AI", self.show_ai_chat, background=P["raised"],
+            foreground=P["accent"], active_background=P["selected"],
+            font=("Segoe UI", 10, "bold"), padx=14, pady=7)
+        self.ai_chat_btn.pack(side="left", padx=(8, 0))
 
         right = tk.Frame(header, bg=P["panel"])
         right.pack(side="right", fill="y", padx=(0, 12))
@@ -347,13 +352,16 @@ class LayoutMixin(WorkspaceLayoutMixin):
             f"{aspect_label(self.settings.get('resolution'))} · "
             f"{Path(item[1]).name}")
         self.scene_clock_var.set(f"{index + 1:02d} / {count:02d}")
-        self._set_scene_seek(index, max(0, count - 1))
+        if getattr(self, "_timeline_ready", False):
+            self._update_timeline_clock_label()
+        else:
+            self._set_scene_seek(index, max(0, count - 1))
 
     def _set_scene_seek(self, value, maximum):
         if not hasattr(self, "seek_canvas"):
             return
-        self._seek_index = max(0, int(value))
-        self._seek_max = max(0, int(maximum))
+        self._seek_index = max(0, float(value))
+        self._seek_max = max(0, float(maximum))
         self._draw_scene_seek()
 
     def _draw_scene_seek(self):
@@ -388,6 +396,10 @@ class LayoutMixin(WorkspaceLayoutMixin):
             return
         width = max(1, self.seek_canvas.winfo_width())
         fraction = (event.x - 5) / max(1, width - 10)
+        if getattr(self, "_timeline_ready", False):
+            _layout, total = self.timeline_layout()
+            self.seek_timeline(max(0, min(1, fraction)) * total)
+            return
         index = int(round(max(0.0, min(1.0, fraction)) * max(0, len(self.media_files) - 1)))
         if index != self._selected_item_index():
             self.select_scene(index, preview=True)
@@ -429,6 +441,10 @@ class LayoutMixin(WorkspaceLayoutMixin):
         item = self.media_files[index]
         presentation = normalize_presentation(item[2].get("presentation"))
         self._active_presentation_scene_id = presentation.get("scene_id")
+        if getattr(self, "_timeline_ready", False) and not getattr(self, "_preview_playing", False):
+            layout, _total = self.timeline_layout()
+            self._playhead_seconds = layout[index]["start"]
+            self._draw_timeline_playhead()
         self._refresh_selection()
         self._refresh_stage()
         self.render_storyboard()
@@ -450,48 +466,13 @@ class LayoutMixin(WorkspaceLayoutMixin):
         self.select_scene(min(len(self.media_files) - 1, index + 1))
 
     def _toggle_preview_play(self):
-        if getattr(self, "_preview_playing", False):
-            self._stop_preview_play()
-        elif getattr(self, "media_files", None):
-            self._preview_playing = True
-            self.play_btn.configure(text="❚❚")
-            index = self._selected_item_index()
-            if index is None:
-                index = 0
-                self.select_scene(index, preview=True, sync_inspector=False)
-            seconds = self._scene_seconds(self.media_files[index])
-            self._preview_play_job = self.root.after(
-                max(700, min(6000, int(seconds * 1000))), self._advance_preview_play)
+        self.toggle_timeline_playback()
 
     def _stop_preview_play(self):
-        self._preview_playing = False
-        job = getattr(self, "_preview_play_job", None)
-        if job is not None:
-            try:
-                self.root.after_cancel(job)
-            except tk.TclError:
-                pass
-        self._preview_play_job = None
-        if hasattr(self, "play_btn"):
-            self.play_btn.configure(text="▶")
+        self.stop_timeline_playback()
 
     def _advance_preview_play(self):
-        self._preview_play_job = None
-        if not getattr(self, "_preview_playing", False) or not self.media_files:
-            self._stop_preview_play()
-            return
-        index = self._selected_item_index()
-        if index is None:
-            index = 0
-        else:
-            index += 1
-        if index >= len(self.media_files):
-            self._stop_preview_play()
-            return
-        self.select_scene(index, preview=True, sync_inspector=False)
-        seconds = self._scene_seconds(self.media_files[index])
-        self._preview_play_job = self.root.after(
-            max(700, min(6000, int(seconds * 1000))), self._advance_preview_play)
+        self._timeline_tick()
 
     # ----------------------------------------------------------- status bar
     def _build_status_bar(self):

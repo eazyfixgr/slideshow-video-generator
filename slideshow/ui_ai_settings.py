@@ -53,7 +53,7 @@ class AISettingsMixin:
         ttk.Label(body, text="Βελτίωση κειμένου με AI",
                   font=("Segoe UI", 13, "bold")).pack(anchor="w")
         ttk.Label(body, foreground="#666", wraplength=660, justify="left",
-                  text="Χρησιμοποιείται από τα κουμπιά «Βελτίωση με AI». "
+                  text="Χρησιμοποιείται από τα κουμπιά «Βελτίωση με AI» και το Talk to AI. "
                        "Το κείμενο στέλνεται μόνο στον πάροχο που επιλέγεις.").pack(
             anchor="w", pady=(2, 8))
         enabled_var = tk.BooleanVar(value=bool(self.settings.get("ai_enabled")))

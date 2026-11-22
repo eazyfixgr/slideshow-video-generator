@@ -24,12 +24,15 @@ from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhan
 from .slide_design import render_design_layers
 from .export_quality import ExportQualityMixin
 from .export_live_preview import ExportLivePreviewMixin
+from .audio_export import AudioExportMixin
 
 
-class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
+class ExportMixin(AudioExportMixin, ExportQualityMixin, ExportLivePreviewMixin):
     """The whole ffmpeg export pipeline: clips, transitions, watermark, music."""
 
     def export_video(self):
+        self._stop_voiceover_capture(save=True)
+        self._stop_preview_play()
         n = self.name_var.get().strip()
         if not n:
             messagebox.showwarning(
@@ -616,193 +619,6 @@ class ExportMixin(ExportQualityMixin, ExportLivePreviewMixin):
             return d if d > 0 else default
         except Exception:
             return default
-
-
-    def _prepared_music(self, path, temp_dir, index):
-        """A copy of a music track with leading/trailing silence removed.
-
-        Returns (path, duration). On any failure the original is returned so the
-        export still runs. The trimmed copy is cached in temp for this run.
-        """
-        out = temp_dir / f"music_trim_{index:02d}.m4a"
-        sr = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05:detection=peak"
-        af = (sr + ",areverse," + sr + ",areverse," +
-              "aresample=44100,aformat=channel_layouts=stereo")
-        try:
-            self._run_ffmpeg_or_raise(['ffmpeg', '-y', '-i', str(path), '-af', af,
-                                       '-c:a', 'aac', str(out)], "trimming music silence")
-        except Exception as e:
-            self._log_export(f"music: trim failed for {Path(path).name} ({e}); using original")
-            return path, self._probe_duration(path)
-        return out, self._probe_duration(out)
-
-
-    def finalize_audio_ffmpeg(self, vid_p, out_p, duration, temp_dir, voice_path=None):
-        cf = max(0.0, float(self.settings.get("crossfade_duration", 0) or 0))
-        trim = bool(self.settings.get("trim_silence", False))
-        vol = 10**(self.settings["volume_db"] / 20)
-        vg = 10**(float(self.settings.get("video_audio_volume_db", 0) or 0) / 20)
-
-        tracks = []      # original music files (for the used-music tracker/logs)
-        raw_durs = []
-        rem = duration
-        guard = 0
-        while rem > 0:
-            guard += 1
-            if guard > 300:  # safety cap - never loop forever
-                self._log_export("music: safety cap reached, stopping selection")
-                break
-            m = self.get_next_music()
-            if not m:
-                break
-            if not Path(m).exists():
-                # The file was deleted but is still listed in the tracker.
-                self.mark_music_used(m)
-                self._log_export(f"music: skipped missing file {Path(m).name}")
-                continue
-            tracks.append(m)
-            self.mark_music_used(m)  # advances the rotation in memory
-            d = self._probe_duration(m)
-            raw_durs.append(d)
-            self._log_export(f"music: +{Path(m).name} ({d:.1f}s)")
-            rem -= d
-
-        # Optional silence-trim first, so the bed we measure uses real durations.
-        bed, bed_durs = [], []
-        for k, m in enumerate(tracks):
-            p, d = self._prepared_music(m, temp_dir, k) if trim else (m, raw_durs[k])
-            bed.append(p)
-            bed_durs.append(d)
-
-        def coverage():
-            # Crossfades shorten the bed by (n-1)*cf.
-            return sum(bed_durs) - max(0, len(bed) - 1) * cf
-
-        # Keep adding tracks until the bed really covers the video.
-        while bed and coverage() < duration and guard < 300:
-            guard += 1
-            m = self.get_next_music()
-            if not m or not Path(m).exists():
-                break
-            tracks.append(m)
-            self.mark_music_used(m)
-            p, d = (self._prepared_music(m, temp_dir, len(tracks) - 1) if trim
-                    else (m, self._probe_duration(m)))
-            bed.append(p)
-            bed_durs.append(d)
-            self._log_export(f"music: +{Path(m).name} ({d:.1f}s) for crossfade/trim coverage")
-
-        self._log_export(f"music: {len(tracks)} track(s), bed {sum(bed_durs):.1f}s "
-                         f"(video {duration:.1f}s, crossfade={cf:.1f}s, trim_silence={trim})")
-
-        if not tracks:
-            # No music available. Keep the video's own sound if enabled,
-            # otherwise just copy the silent video (instead of erroring).
-            self._export_music_missing = True
-            use_voice = bool(voice_path and Path(voice_path).exists())
-            tmp_out = out_p.with_name(out_p.stem + "_tmp" + out_p.suffix)
-            try:
-                if use_voice:
-                    self._run_ffmpeg_or_raise(
-                        ['ffmpeg', '-y', '-i', str(vid_p), '-i', str(voice_path),
-                         '-map', '0:v', '-filter:a', f'volume={vg:.4f}',
-                         '-c:v', 'copy', '-c:a', 'aac',
-                         '-shortest', str(tmp_out)], "adding video sound (no music)")
-                else:
-                    self._run_ffmpeg_or_raise(['ffmpeg', '-y', '-i', str(vid_p), '-c', 'copy', str(tmp_out)],
-                                              "copying video")
-                os.replace(tmp_out, out_p)
-            finally:
-                try:
-                    tmp_out.unlink()
-                except OSError:
-                    pass
-            self._export_voice_used = use_voice
-            self._log_export("music: none found, video kept " +
-                             ("with its own audio" if use_voice else "without audio"))
-            return
-
-        if coverage() < duration - 0.1:
-            raise RuntimeError(
-                f"Η μουσική που επιλέχθηκε είναι μόνο ~{coverage():.0f} δευτ., ενώ το βίντεο θέλει "
-                f"{duration:.0f} δευτ. Πρόσθεσε περισσότερα τραγούδια στον φάκελο μουσικής "
-                "ή κάνε Refresh Music List στις ρυθμίσεις."
-            )
-
-        # Keep a crossfade shorter than the shortest track.
-        if len(bed) > 1 and cf > 0:
-            cf = min(cf, max(0.1, min(bed_durs) - 0.1))
-
-        # ---- build the music filter graph (crossfade / concat / volume) ----
-        inputs = ['-i', str(vid_p)]
-        for p in bed:
-            inputs += ['-i', str(p)]
-        pre, labels = [], []
-        for k in range(len(bed)):
-            pre.append(f"[{k + 1}:a]aresample=44100,aformat=channel_layouts=stereo[m{k}]")
-            labels.append(f"[m{k}]")
-
-        if len(bed) == 1:
-            mcat = labels[0]
-        elif cf > 0:
-            cur = labels[0]
-            for k in range(1, len(bed)):
-                out = f"[c{k}]" if k < len(bed) - 1 else "[mcat]"
-                pre.append(f"{cur}{labels[k]}acrossfade=d={cf:.3f}:c1=tri:c2=tri{out}")
-                cur = out
-            mcat = "[mcat]"
-        else:
-            pre.append("".join(labels) + f"concat=n={len(bed)}:v=0:a=1[mcat]")
-            mcat = "[mcat]"
-
-        # Mix the (optional) original video sound under the music. Duration is
-        # taken from the music (>= the video), then -shortest trims to the video.
-        use_voice = bool(voice_path and Path(voice_path).exists())
-        if use_voice:
-            voice_idx = 1 + len(bed)
-            inputs += ['-i', str(voice_path)]
-            pre.append(f"{mcat}volume={vol:.4f}[music]")
-            pre.append(f"[{voice_idx}:a]volume={vg:.4f}[voice]")
-            pre.append("[music][voice]amix=inputs=2:duration=first:normalize=0[a]")
-        else:
-            pre.append(f"{mcat}volume={vol:.4f}[a]")
-
-        cmd = (['ffmpeg', '-y'] + inputs +
-               ['-filter_complex', ";".join(pre), '-map', '0:v', '-map', '[a]',
-                '-c:v', 'copy', '-c:a', 'aac', '-shortest', str(out_p)])
-        self._export_voice_used = use_voice
-
-        # Mux to a temporary file (same dir, valid .mp4 extension so ffmpeg can
-        # infer the format) and verify before replacing the destination, so a
-        # failed/truncated export never destroys the user's previous output file.
-        tmp_out = out_p.with_name(out_p.stem + "_tmp" + out_p.suffix)
-        cmd[cmd.index(str(out_p))] = str(tmp_out)
-        try:
-            self._run_ffmpeg_or_raise(cmd, "mixing music into video")
-
-            # Final safety net: -shortest can truncate the video if the music turned
-            # out shorter than expected. Verify the whole video is kept.
-            out_dur = self._probe_duration(tmp_out, default=0.0)
-            self._log_export(f"music: final output {out_dur:.1f}s (video was {duration:.1f}s)")
-            if out_dur < duration - 0.1:
-                raise RuntimeError(
-                    f"Το τελικό βίντεο βγήκε μόνο {out_dur:.0f} δευτ. ενώ έπρεπε να είναι {duration:.0f} δευτ. "
-                    "Μάλλον η μουσική ήταν πιο σύντομη από το βίντεο. Πρόσθεσε περισσότερα τραγούδια "
-                    "στον φάκελο μουσικής ή κάνε Refresh Music List στις ρυθμίσεις."
-                )
-            os.replace(tmp_out, out_p)
-        finally:
-            try:
-                tmp_out.unlink()
-            except OSError:
-                pass
-
-        # Only now that the output succeeded, persist the used-music marks - so a
-        # failed export doesn't burn the music for the next attempt.
-        for m in tracks:
-            self.mark_music_used(m)
-        self.save_music_tracker()
-        self._log_export(f"music: output written ({Path(out_p).name}), {len(tracks)} track(s) marked used")
 
 
     def _build_merged_with_transitions(self, clip_files, clip_durations, temp_dir, merged,

@@ -1,327 +1,391 @@
-"""The horizontal scene strip below the workspace."""
+"""Time-scaled visual/audio timeline, replacing the equal-width storyboard strip."""
 
-import os
+import copy
 import threading
-from pathlib import Path
-
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 
-from .deps import Image, ImageTk
+from .audio_workspace import AudioWorkspaceMixin
+from .deps import ImageTk
 from .slide_design import normalize_presentation
+from .timeline_model import trim_audio
+from .ui_audio_tracks import AudioTracksMixin
+from .ui_timeline_playback import TimelinePlaybackMixin, timecode
+from .ui_voiceover import VoiceoverMixin
 from .ui_theme import MODERN_PALETTE as P
-from .ui_widgets import SlimScrollbar, fit_cover, flat_button, format_duration
+from .ui_widgets import SlimScrollbar, fit_cover, flat_button
+
+ORIGIN, VISUAL_TOP, VISUAL_BOTTOM, AUDIO_TOP, LANE = 140, 42, 126, 146, 58
 
 
-class StoryboardMixin:
-    """The horizontal scene strip below the workspace."""
-
+class StoryboardMixin(AudioWorkspaceMixin, AudioTracksMixin, TimelinePlaybackMixin, VoiceoverMixin):
     def _build_storyboard(self, parent):
-        frame = tk.Frame(parent, bg=P["panel"], height=170,
+        frame = tk.Frame(parent, bg=P["panel"], height=310,
                          highlightbackground=P["border"], highlightthickness=1)
         frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 6))
         frame.grid_propagate(False)
         frame.columnconfigure(0, weight=1)
-
+        frame.rowconfigure(1, weight=1)
         header = tk.Frame(frame, bg=P["panel"])
-        header.grid(row=0, column=0, sticky="ew", padx=12, pady=(6, 2))
-        tk.Label(header, text="STORYBOARD", bg=P["panel"], fg=P["muted"],
-                 font=("Segoe UI", 8, "bold")).pack(side="left")
-        self.storyboard_count_var = tk.StringVar(value="0 σκηνές")
-        tk.Label(header, textvariable=self.storyboard_count_var, bg=P["panel"],
-                 fg=P["text"], font=("Segoe UI", 9, "bold")).pack(side="left", padx=(8, 0))
-        tk.Label(header, text="Σύρε για αναδιάταξη · διπλό κλικ για επεξεργασία · "
-                              "Ctrl/Shift για ομάδα και δεξί κλικ για ομαδοποίηση",
-                 bg=P["panel"], fg=P["muted"], font=("Segoe UI", 8)).pack(
-            side="left", padx=(14, 0))
-        canvas = tk.Canvas(frame, bg=P["panel"], highlightthickness=0, height=120)
-        canvas.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 2))
-        scrollbar = SlimScrollbar(frame, command=canvas.xview, orient="horizontal",
-                                  background=P["panel"], color=P["border"],
-                                  active=P["muted"])
-        scrollbar.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 4))
-        canvas.configure(xscrollcommand=scrollbar.set)
-        inner = tk.Frame(canvas, bg=P["panel"])
-        window = canvas.create_window((0, 0), window=inner, anchor="nw")
-        inner.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, height=e.height))
-        canvas.bind("<MouseWheel>", self._storyboard_scroll_wheel)
-        inner.bind("<MouseWheel>", self._storyboard_scroll_wheel)
-
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=4)
+        tk.Label(header, text="TIMELINE", bg=P["panel"], fg=P["text"],
+                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 8))
+        self.timeline_clock_var = tk.StringVar(value="00:00.000 / 00:00.000")
+        self.storyboard_count_var = self.timeline_clock_var
+        tk.Label(header, textvariable=self.timeline_clock_var, bg=P["panel"], fg=P["accent"],
+                 font=("Segoe UI", 9)).pack(side="left", padx=(0, 12))
+        for label, command in (("+ Ήχος", self.add_audio_files), ("+ Audio track", self.add_audio_track),
+                               ("Αυτόματη μουσική", self.regenerate_music_plan),
+                               ("Voice-over", self.show_voiceover_recorder),
+                               ("−", lambda: self._timeline_zoom_by(.8)), ("+", lambda: self._timeline_zoom_by(1.25)),
+                               ("Fit", self._timeline_fit_all)):
+            flat_button(header, label, command, background=P["raised"], foreground=P["text"],
+                        active_background=P["selected"], font=("Segoe UI", 8), padx=7, pady=3).pack(
+                side="left", padx=2)
+        height = ttk.Scale(header, from_=220, to=520, length=80,
+                           command=lambda value: frame.configure(height=int(float(value))))
+        height.set(310)
+        height.pack(side="right")
+        tk.Label(header, text="Ύψος", bg=P["panel"], fg=P["muted"], font=("Segoe UI", 8)).pack(side="right")
+        canvas = tk.Canvas(frame, bg=P["background"], highlightthickness=0, cursor="crosshair")
+        canvas.grid(row=1, column=0, sticky="nsew", padx=(2, 0))
+        horizontal = SlimScrollbar(frame, command=self._timeline_xview, orient="horizontal",
+                                   background=P["panel"], color=P["border"], active=P["muted"])
+        horizontal.grid(row=2, column=0, sticky="ew", padx=3)
+        vertical = SlimScrollbar(frame, command=canvas.yview, orient="vertical",
+                                 background=P["panel"], color=P["border"], active=P["muted"])
+        vertical.grid(row=1, column=1, sticky="ns")
+        canvas.configure(xscrollcommand=horizontal.set, yscrollcommand=vertical.set)
         self.storyboard_frame = frame
         self.storyboard_canvas = canvas
-        self.storyboard_inner = inner
-        self.storyboard_window = window
-        self._sb_widgets = []
-        self._sb_drag = None
-        self._sb_anchor = None
-        self._sb_token = 0
-        self._sb_photo_refs = {}
-        if not hasattr(self, "_sb_thumb_cache"):
-            self._sb_thumb_cache = {}
+        self.storyboard_inner = canvas  # retained for callers that check the old strip's existence
+        self._timeline_ready = True
+        self._timeline_zoom, self._timeline_fit = 24.0, True
+        self._sb_anchor, self._timeline_drag = None, None
+        self._sb_widgets, self._sb_photo_refs = [], {}
+        self._sb_thumb_cache, self._sb_pending = {}, set()
+        self._timeline_display_tracks, self._timeline_waveforms = [], {}
+        self._timeline_audio_key = None
+        canvas.bind("<Button-1>", self._timeline_press)
+        canvas.bind("<B1-Motion>", self._timeline_motion)
+        canvas.bind("<ButtonRelease-1>", self._timeline_release)
+        canvas.bind("<Double-Button-1>", self._timeline_double)
+        canvas.bind("<Button-3>", self._timeline_menu)
+        canvas.bind("<MouseWheel>", self._timeline_wheel)
+        canvas.bind("<space>", lambda _e: self.toggle_timeline_playback())
+        canvas.bind("<Configure>", lambda _e: self.render_storyboard())
         return frame
 
-    @staticmethod
-    def _storyboard_scroll_wheel(event):
-        try:
-            delta = int(event.delta)
-        except (TypeError, ValueError):
-            return None
-        event.widget.xview_scroll(-1 if delta > 0 else 1, "units")
+    def _scene_seconds(self, item):
+        p = normalize_presentation(item[2].get("presentation"))
+        if item[0] == "image":
+            return float(p["duration"] or self.settings.get("slide_duration", 3))
+        full = self._video_dur_cache.get(str(item[1]))
+        if full is None:
+            full = self._video_duration(item[1])
+            self._video_dur_cache[str(item[1])] = full
+        kept = sum(length for _offset, length in self.video_keep_segments(item[2], full))
+        return min(kept, p["duration"]) if p["duration"] else kept
+
+    def _timeline_fit_all(self):
+        self._timeline_fit = True
+        self.render_storyboard()
+
+    def _timeline_zoom_by(self, factor):
+        self._timeline_fit = False
+        self._timeline_zoom = max(2, min(220, self._timeline_zoom * factor))
+        self.render_storyboard()
+
+    def _timeline_xview(self, *args):
+        if hasattr(self, "storyboard_canvas"):
+            self.storyboard_canvas.xview(*args)
+            self._draw_track_labels()
+
+    def _timeline_wheel(self, event):
+        direction = -1 if event.delta > 0 else 1
+        if event.state & 0x0004:
+            self._timeline_zoom_by(1.2 if direction < 0 else 1 / 1.2)
+        elif event.state & 0x0001:
+            self._timeline_xview("scroll", direction * 3, "units")
+        else:
+            self.storyboard_canvas.yview_scroll(direction * 2, "units")
         return "break"
 
-    def _scene_seconds(self, item):
-        try:
-            presentation = normalize_presentation(item[2].get("presentation"))
-            override = presentation.get("duration")
-            if override:
-                return max(0.2, float(override))
-        except (TypeError, ValueError):
-            pass
-        if item[0] == "video":
-            cached = self._video_dur_cache.get(str(item[1]))
-            if cached and cached > 0:
-                return float(cached)
-        try:
-            return max(0.2, float(self.settings.get("slide_duration", 3)))
-        except (TypeError, ValueError):
-            return 3.0
-
-    def _storyboard_thumb_key(self, item):
-        path = str(item[1])
-        try:
-            mtime = os.path.getmtime(path)
-        except OSError:
-            mtime = 0
-        return (path, mtime, str(item[2].get("presentation")), str(item[2].get("crop")),
-                str(item[2].get("brightness")), str(item[2].get("color")),
-                str(item[2].get("rotate", 0)), str(item[2].get("exif_orientation", 0)))
-
-    def _make_storyboard_thumb(self, item):
-        key = self._storyboard_thumb_key(item)
-        cached = self._sb_thumb_cache.get(key)
-        if cached is not None:
-            return cached
-        kind, path, edit = item
-        if kind == "video":
-            image = self._video_first_frame(path)
-        else:
-            image = self.open_thumbnail_image(path, 400, apply_exif=False)
-        thumb_edit = {key: value for key, value in edit.items() if key != "erase"}
-        image = self._apply_image_edit(image.copy(), thumb_edit, path, m_type=kind)
-        image = fit_cover(image, 124, 58)
-        self._sb_thumb_cache[key] = image
-        return image
+    def _timeline_tracks(self):
+        return (self.project_audio["tracks"] if self.project_audio["mode"] == "manual"
+                else self._timeline_display_tracks)
 
     def render_storyboard(self):
-        if not hasattr(self, "storyboard_inner"):
+        if not hasattr(self, "storyboard_canvas") or not hasattr(self, "project_audio"):
             return
-        token = getattr(self, "_sb_token", 0) + 1
-        self._sb_token = token
-        for child in self.storyboard_inner.winfo_children():
-            child.destroy()
-        self._sb_widgets = []
-        self._sb_photo_refs = {}
-        count = len(getattr(self, "media_files", []))
-        self.storyboard_count_var.set(f"{count} {'σκηνή' if count == 1 else 'σκηνές'}")
-        if not count:
-            tk.Label(self.storyboard_inner, text="Οι σκηνές σου θα εμφανιστούν εδώ.",
-                     bg=P["panel"], fg=P["muted"], font=("Segoe UI", 9)).pack(
-                side="left", padx=16, pady=30)
-            return
+        canvas = self.storyboard_canvas
+        layout, total = self.timeline_layout()
+        self._timeline_layout, self._timeline_total = layout, total
+        if self._timeline_fit and total:
+            self._timeline_zoom = max(2, min(220, (max(500, canvas.winfo_width()) - ORIGIN - 30) / total))
+        scale = self._timeline_zoom
+        tracks = self._timeline_tracks()
+        horizon = max(total, max((clip["start"] + clip["duration"] for track in tracks
+                                  for clip in track["clips"]), default=0), 10)
+        self._timeline_width = ORIGIN + horizon * scale + 100
+        self._timeline_height = AUDIO_TOP + max(2, len(tracks)) * LANE + 12
+        canvas.delete("all")
+        canvas.configure(scrollregion=(0, 0, self._timeline_width, self._timeline_height))
+        step = next((value for value in (.2, .5, 1, 2, 5, 10, 15, 30, 60, 120, 300)
+                     if value * scale >= 60), 600)
+        for tick in range(int(horizon / step) + 2):
+            t = tick * step
+            x = ORIGIN + t * scale
+            canvas.create_line(x, 25, x, self._timeline_height, fill=P["border"])
+            canvas.create_text(x + 3, 12, text=timecode(t)[:-4], anchor="w", fill=P["muted"], font=("Segoe UI", 8))
+        groups = {}
+        for timing, item in zip(layout, self.media_files):
+            group = item[2].get("group_id")
+            if group:
+                bounds = groups.setdefault(group, [timing["start"], timing["end"]])
+                bounds[0], bounds[1] = min(bounds[0], timing["start"]), max(bounds[1], timing["end"])
+        for start, end in groups.values():
+            canvas.create_rectangle(ORIGIN + start * scale, 30, ORIGIN + end * scale, VISUAL_BOTTOM + 5,
+                                    outline=P["accent"], width=2)
+        for timing, item in zip(layout, self.media_files):
+            index = timing["index"]
+            x1, x2 = ORIGIN + timing["start"] * scale, ORIGIN + timing["end"] * scale
+            tag = f"scene:{index}"
+            selected = index in self.selected_indices
+            canvas.create_rectangle(x1, VISUAL_TOP, x2, VISUAL_BOTTOM, fill=P["raised"],
+                                    outline=P["accent"] if selected else P["muted"], width=2 if selected else 1, tags=tag)
+            thumb_key = (str(item[1]), repr(item[2].get("crop")), item[2].get("rotate", 0),
+                         item[2].get("brightness", 1), item[2].get("color", 1))
+            cached = self._sb_thumb_cache.get(thumb_key)
+            if cached is not None and x2 - x1 > 16:
+                image = cached.copy()
+                image = fit_cover(image, max(1, min(124, int(x2 - x1 - 4))), 44)
+                photo = ImageTk.PhotoImage(image, master=self.root)
+                self._sb_photo_refs[index] = photo
+                canvas.create_image(x1 + 2, VISUAL_TOP + 2, anchor="nw", image=photo, tags=tag)
+            elif thumb_key not in self._sb_pending:
+                self._queue_scene_thumb(item, thumb_key)
+            if timing["overlap"]:
+                canvas.create_rectangle(x1, VISUAL_TOP, x1 + timing["overlap"] * scale, VISUAL_BOTTOM,
+                                        outline=P["accent"], dash=(3, 3), tags=tag)
+            if x2 - x1 > 35:
+                caption = f"{index + 1:02d} · {timing['duration']:.2f}s"
+                canvas.create_text(x1 + 4, VISUAL_BOTTOM - 24, anchor="w", text=caption,
+                                   fill=P["text"], font=("Segoe UI", 8, "bold"), width=max(20, x2 - x1 - 8), tags=tag)
+                canvas.create_text(x1 + 4, VISUAL_BOTTOM - 8, anchor="w", text=Path(item[1]).name[:max(3, int((x2-x1)/6))],
+                                   fill=P["muted"], font=("Segoe UI", 7), tags=tag)
+        for lane, track in enumerate(tracks):
+            y = AUDIO_TOP + lane * LANE
+            canvas.create_rectangle(ORIGIN, y, self._timeline_width, y + LANE - 4, fill=P["field"], outline="")
+            for clip in track["clips"]:
+                x1, x2 = ORIGIN + clip["start"] * scale, ORIGIN + (clip["start"] + clip["duration"]) * scale
+                tag = f"audio:{clip['id']}"
+                color = P["accent_faint"] if clip.get("recording") else P["selected"]
+                selected = clip["id"] == getattr(self, "_selected_audio_clip", None)
+                canvas.create_rectangle(x1, y + 3, x2, y + LANE - 7, fill=color,
+                                        outline=P["accent"] if selected else P["muted"], tags=tag)
+                info = self._timeline_waveforms.get(clip["path"])
+                if info:
+                    peaks = info["peaks"]
+                    count = max(1, min(350, int((x2 - x1) / 3)))
+                    for bin_index in range(count):
+                        source_at = clip["offset"] + clip["duration"] * bin_index / count
+                        peak = peaks[min(len(peaks)-1, int(source_at / max(.01, info["duration"]) * len(peaks)))]
+                        x = x1 + (x2-x1) * bin_index / count
+                        half = min(16, peak * 28)
+                        canvas.create_line(x, y + 29 - half, x, y + 29 + half, fill=P["good"], tags=tag)
+                if x2 - x1 > 45:
+                    canvas.create_text(x1 + 4, y + 12, text=Path(clip["path"]).name[:max(4, int((x2-x1)/6))],
+                                       anchor="w", fill=P["text"], font=("Segoe UI", 8), tags=tag)
+        end_x = ORIGIN + total * scale
+        canvas.create_line(end_x, 25, end_x, self._timeline_height, fill=P["danger"], dash=(5, 4))
+        self._draw_track_labels()
+        self._draw_timeline_playhead()
+        self._update_timeline_clock_label(total)
+        self._queue_timeline_audio(total)
 
-        start = 0.0
-        pending = []
-        index = 0
-        while index < count:
-            item = self.media_files[index]
-            group_id = item[2].get("group_id")
-            if group_id:
-                end = index + 1
-                while (end < count and
-                       self.media_files[end][2].get("group_id") == group_id):
-                    end += 1
-                group = tk.Frame(self.storyboard_inner, bg=P["accent_faint"],
-                                 highlightbackground=P["accent"],
-                                 highlightthickness=2, padx=2, pady=2)
-                group.pack(side="left", padx=5, pady=4)
-                group.bind("<MouseWheel>", self._storyboard_scroll_wheel)
-                for grouped in range(index, end):
-                    item = self.media_files[grouped]
-                    seconds = self._scene_seconds(item)
-                    card = self._make_storyboard_card(
-                        grouped, item, start, seconds, parent=group, pack=False)
-                    card.pack(side="left", padx=2, pady=1)
-                    start += seconds
-                    self._sb_widgets.append(card)
-                    key = self._storyboard_thumb_key(item)
-                    cached = self._sb_thumb_cache.get(key)
-                    if cached is not None:
-                        self._apply_storyboard_thumb(card, grouped, cached)
-                    else:
-                        pending.append((grouped, item, card))
-                index = end
-                continue
-            seconds = self._scene_seconds(item)
-            card = self._make_storyboard_card(index, item, start, seconds)
-            start += seconds
-            self._sb_widgets.append(card)
-            key = self._storyboard_thumb_key(item)
-            cached = self._sb_thumb_cache.get(key)
-            if cached is not None:
-                self._apply_storyboard_thumb(card, index, cached)
-            else:
-                pending.append((index, item, card))
-            index += 1
-        if pending:
-            self._queue_storyboard_thumbs(pending, token)
-
-    def _make_storyboard_card(self, index, item, start, seconds, parent=None,
-                              pack=True):
-        selected = index in getattr(self, "selected_indices", set())
-        card = tk.Frame(parent or self.storyboard_inner, bg=P["raised"],
-                        width=132, height=100, highlightthickness=2,
-                        highlightbackground=(P["accent"] if selected else P["border"]),
-                        cursor="hand2")
-        if pack:
-            card.pack(side="left", padx=4, pady=7)
-        card.pack_propagate(False)
-        holder = tk.Frame(card, bg=P["stage"], width=124, height=58)
-        holder.pack(padx=3, pady=(3, 1))
-        holder.pack_propagate(False)
-        thumb = tk.Label(holder, bg=P["stage"],
-                         text=("▶" if item[0] == "video" else "▦"),
-                         fg=P["muted"], font=("Segoe UI", 15))
-        thumb.pack(fill="both", expand=True)
-        row = tk.Frame(card, bg=P["raised"])
-        row.pack(fill="x", padx=5)
-        tk.Label(row, text=f"{index + 1:02d}", bg=P["raised"], fg=P["accent"],
-                 font=("Segoe UI", 8, "bold")).pack(side="left")
-        tk.Label(row, text=f"{'βίντεο' if item[0] == 'video' else 'φωτό'} · "
-                           f"{format_duration(seconds)}", bg=P["raised"], fg=P["muted"],
-                 font=("Segoe UI", 7)).pack(side="right")
-        time_row = tk.Frame(card, bg=P["raised"])
-        time_row.pack(fill="x", padx=5)
-        tk.Label(time_row, text=f"@{format_duration(start)}", bg=P["raised"],
-                 fg=P["muted"], font=("Segoe UI", 7)).pack(side="left")
-        tk.Label(time_row, text=Path(item[1]).name, bg=P["raised"], fg=P["muted"],
-                 font=("Segoe UI", 7), anchor="e").pack(side="right")
-
-        for widget in (card, holder, thumb, row, time_row, *row.winfo_children(),
-                       *time_row.winfo_children()):
-            widget.bind("<Button-1>", lambda e, i=index: self._storyboard_press(e, i))
-            widget.bind("<B1-Motion>", lambda e, i=index: self._storyboard_motion(e, i))
-            widget.bind("<ButtonRelease-1>", lambda e, i=index: self._storyboard_release(e, i))
-            widget.bind("<Double-Button-1>", lambda e, i=index: self.open_edit_dialog(i))
-            widget.bind("<Button-3>", lambda e, i=index: self.media_menu(e, i))
-            widget.bind("<MouseWheel>", self._storyboard_scroll_wheel)
-        card._thumb_label = thumb
-        return card
-
-    def _apply_storyboard_thumb(self, card, index, image):
-        try:
-            if not card.winfo_exists() or card not in self._sb_widgets:
-                return
-            label = getattr(card, "_thumb_label", None)
-            if label is None or not label.winfo_exists():
-                return
-            photo = ImageTk.PhotoImage(image, master=self.root)
-            self._sb_photo_refs[index] = photo
-            label.configure(image=photo, text="", width=0, height=0)
-        except tk.TclError:
-            pass
-
-    def _queue_storyboard_thumbs(self, pending, token):
+    def _queue_scene_thumb(self, item, key):
+        self._sb_pending.add(key)
+        token = self._session_id
+        def receive(image):
+            self._sb_pending.discard(key)
+            if token == self._session_id:
+                self._sb_thumb_cache[key] = image
+                self.render_storyboard()
         def worker():
-            for index, item, card in pending:
-                if token != getattr(self, "_sb_token", 0):
-                    break
-                try:
-                    image = self._make_storyboard_thumb(item)
-                except Exception:
-                    continue
-                self._post_ui(self._apply_storyboard_thumb, card, index, image)
-
+            try:
+                kind, path, edit = item
+                image = self._video_first_frame(path) if kind == "video" else self.open_thumbnail_image(path, 350, False)
+                image = self._apply_image_edit(image.copy(), {k: v for k, v in edit.items() if k != "erase"}, path, m_type=kind)
+                self._post_ui(receive, fit_cover(image, 124, 44))
+            except Exception:
+                self._sb_pending.discard(key)
         threading.Thread(target=worker, daemon=True).start()
 
+    def _draw_track_labels(self):
+        canvas = self.storyboard_canvas
+        canvas.delete("lane-label")
+        left = canvas.canvasx(0)
+        for y, label, tag in [(0, "Χρόνος", "ruler"), (VISUAL_TOP, "V1 · Εικόνα / βίντεο", "visual")]:
+            canvas.create_rectangle(left, y, left + ORIGIN - 3, y + (25 if y == 0 else 84), fill=P["panel"], outline="", tags="lane-label")
+            canvas.create_text(left + 8, y + 12, anchor="w", text=label, fill=P["muted"], font=("Segoe UI", 8), tags=("lane-label", tag))
+        for index, track in enumerate(self._timeline_tracks()):
+            y = AUDIO_TOP + index * LANE
+            tag = f"track:{track['id']}"
+            canvas.create_rectangle(left, y, left + ORIGIN - 3, y + LANE - 4, fill=P["panel"], outline="", tags=("lane-label", tag))
+            flags = (" MUTE" if track["mute"] else "") + (" SOLO" if track["solo"] else "")
+            canvas.create_text(left + 8, y + 14, anchor="w", text=f"A{index+1} · {track['name'][:17]}",
+                               fill=P["accent"] if flags else P["text"], font=("Segoe UI", 8, "bold"), tags=("lane-label", tag))
+            canvas.create_text(left + 8, y + 32, anchor="w", text=f"{track['volume_db']:+g} dB{flags}",
+                               fill=P["muted"], font=("Segoe UI", 7), tags=("lane-label", tag))
+
+    def _draw_timeline_playhead(self):
+        if not hasattr(self, "storyboard_canvas"):
+            return
+        canvas = self.storyboard_canvas
+        canvas.delete("playhead")
+        x = ORIGIN + getattr(self, "_playhead_seconds", 0) * self._timeline_zoom
+        canvas.create_line(x, 24, x, getattr(self, "_timeline_height", 300), fill=P["danger"], width=2, tags="playhead")
+        canvas.create_polygon(x-5, 1, x+5, 1, x, 10, fill=P["danger"], tags="playhead")
+        if getattr(self, "_preview_playing", False) and x > canvas.canvasx(canvas.winfo_width() - 30):
+            canvas.xview_moveto(max(0, (x - canvas.winfo_width() + 100) / max(1, self._timeline_width)))
+            self._draw_track_labels()
+
     def _refresh_selection(self):
-        for index, card in enumerate(getattr(self, "_sb_widgets", [])):
-            selected = index in getattr(self, "selected_indices", set())
-            try:
-                card.configure(highlightbackground=(P["accent"] if selected
-                                                    else P["border"]),
-                               highlightthickness=2 if selected else 1)
-            except tk.TclError:
-                pass
+        self.render_storyboard()
 
-    def _storyboard_press(self, event, index):
-        self._active_media_panel = "project"
-        ctrl = bool(event.state & 0x0004)
-        shift = bool(event.state & 0x0001)
-        if ctrl:
-            if index in self.selected_indices:
-                self.selected_indices.discard(index)
-            else:
-                self.selected_indices.add(index)
+    def _timeline_hit(self, event):
+        canvas = self.storyboard_canvas
+        x, y = canvas.canvasx(event.x), canvas.canvasy(event.y)
+        tags = []
+        for item in reversed(canvas.find_overlapping(x, y, x, y)):
+            tags += list(canvas.gettags(item))
+        for prefix in ("track:", "audio:", "scene:"):
+            tag = next((tag for tag in tags if tag.startswith(prefix)), None)
+            if tag:
+                return prefix[:-1], tag.split(":", 1)[1], x, y
+        return None, None, x, y
+
+    def _timeline_press(self, event):
+        if getattr(self, "_voiceover_recording", False):
+            return
+        self._stop_preview_play()
+        self._commit_pending_caption_apply()
+        self.storyboard_canvas.focus_set()
+        kind, key, x, y = self._timeline_hit(event)
+        self._timeline_drag = None
+        if y < 28:
+            self.seek_timeline(max(0, (x-ORIGIN)/self._timeline_zoom))
+            self._timeline_drag = {"kind": "seek"}
+            return
+        if kind == "track":
+            self._selected_audio_track = key
+            self._selected_audio_clip = None
+            self._active_media_panel = "audio"
+            return
+        if kind == "scene":
+            index = int(key)
+            if event.state & 0x0004:
+                self.selected_indices.symmetric_difference_update({index})
+            elif event.state & 0x0001 and self._sb_anchor is not None:
+                a, b = sorted((index, self._sb_anchor))
+                self.selected_indices = set(range(a, b+1))
+            elif index not in self.selected_indices:
+                self.selected_indices = {index}
             self._sb_anchor = index
-        elif shift and self._sb_anchor is not None:
-            a, b = sorted((self._sb_anchor, index))
-            self.selected_indices = set(range(a, b + 1))
-        else:
-            self.selected_indices = {index}
-            self._sb_anchor = index
-        self._sel_anchor = min(self.selected_indices) if self.selected_indices else None
-        self._refresh_selection()
-        self._sb_drag = {"idx": index, "x": event.x_root, "moved": False,
-                         "multi": ctrl or shift}
-
-    def _storyboard_motion(self, event, index):
-        drag = getattr(self, "_sb_drag", None)
-        if not drag:
-            return
-        if not drag["moved"] and abs(event.x_root - drag["x"]) < 8:
-            return
-        drag["moved"] = True
-        target = self._storyboard_index_at(event.x_root, event.y_root)
-        for i, card in enumerate(self._sb_widgets):
-            try:
-                card.configure(highlightbackground=(P["accent"] if i == target else
-                                                    (P["accent"] if i in self.selected_indices
-                                                     else P["border"])))
-            except tk.TclError:
-                pass
-
-    def _storyboard_release(self, event, index):
-        drag = getattr(self, "_sb_drag", None)
-        self._sb_drag = None
-        if not drag:
-            return
-        if not drag["moved"]:
-            if drag.get("multi"):
-                self._refresh_stage()
-                self._render_inspector()
-                self._schedule_preview(120)
-            else:
-                self.select_scene(index, preview=True)
-            return
-        target = self._storyboard_index_at(event.x_root, event.y_root)
-        if target is None or target == index:
+            self._active_media_panel = "project"
+            timing = self._timeline_layout[index]
+            edge = abs(x-(ORIGIN+timing["end"]*self._timeline_zoom)) < 6
+            self._timeline_drag = {"kind": "scene", "index": index, "x": x, "duration": timing["duration"],
+                                   "edge": edge, "moved": False, "multi": bool(event.state & 5)}
+            self._refresh_selection()
+        elif kind == "audio":
+            tracks = self._timeline_tracks()
+            track, clip = next((track, clip) for track in tracks for clip in track["clips"] if clip["id"] == key)
+            left = ORIGIN + clip["start"] * self._timeline_zoom
+            right = left + clip["duration"] * self._timeline_zoom
+            edge = "left" if abs(x-left) < 6 else "right" if abs(x-right) < 6 else "move"
+            self._selected_audio_clip, self._selected_audio_track = key, track["id"]
+            self._active_media_panel = "audio"
+            self._timeline_drag = {"kind": "audio", "id": key, "x": x, "edge": edge,
+                                   "clip": copy.deepcopy(clip), "track": track["id"], "moved": False}
             self.render_storyboard()
-            return
-        self._move_selection_to(target)
 
-    def _storyboard_index_at(self, x_root, y_root):
-        best, distance = None, float("inf")
-        for index, card in enumerate(self._sb_widgets):
-            try:
-                x, y = card.winfo_rootx(), card.winfo_rooty()
-                width, height = card.winfo_width(), card.winfo_height()
-            except tk.TclError:
-                continue
-            if x <= x_root <= x + width and y <= y_root <= y + height:
-                return index
-            cx, cy = x + width / 2, y + height / 2
-            current = (x_root - cx) ** 2 + (y_root - cy) ** 2
-            if current < distance:
-                distance, best = current, index
-        return best
+    def _timeline_motion(self, event):
+        drag = self._timeline_drag
+        if not drag:
+            return
+        canvas = self.storyboard_canvas
+        x = canvas.canvasx(event.x)
+        if drag["kind"] == "seek":
+            self.seek_timeline(max(0, (x-ORIGIN)/self._timeline_zoom))
+            return
+        if abs(x-drag["x"]) > 4:
+            drag["moved"] = True
+        if drag["moved"]:
+            canvas.delete("drag-ghost")
+            canvas.create_line(x, 26, x, self._timeline_height, fill=P["accent"], width=2, tags="drag-ghost")
+
+    def _timeline_release(self, event):
+        drag = self._timeline_drag
+        self._timeline_drag = None
+        self.storyboard_canvas.delete("drag-ghost")
+        if not drag or drag["kind"] == "seek":
+            return
+        x, y = self.storyboard_canvas.canvasx(event.x), self.storyboard_canvas.canvasy(event.y)
+        delta = (x-drag["x"]) / self._timeline_zoom
+        if drag["kind"] == "scene":
+            if not drag["moved"]:
+                if drag["multi"]:
+                    self._render_inspector()
+                else:
+                    self.select_scene(drag["index"])
+                return
+            if drag["edge"]:
+                self.push_undo()
+                item = self.media_files[drag["index"]]
+                p = normalize_presentation(item[2].get("presentation"))
+                p["duration"] = max(1, min(30, drag["duration"] + delta))
+                item[2]["presentation"] = p
+                self._audio_changed()
+                self._render_inspector()
+            else:
+                target = min(self._timeline_layout, key=lambda item: abs(
+                    ORIGIN + (item["start"] + item["duration"] / 2) * self._timeline_zoom - x))["index"]
+                self.selected_indices = set(self._grouped_selection_indices())
+                self._move_selection_to(target)
+        elif drag["moved"]:
+            self.push_undo()
+            track, clip = self._audio_by_id(drag["id"])
+            if clip is None:
+                return
+            if drag["edge"] == "move":
+                clip["start"] = max(0.0, round((drag["clip"]["start"] + delta) * 10) / 10)
+                index = max(0, min(len(self.project_audio["tracks"])-1, int((y-AUDIO_TOP)/LANE)))
+                destination = self.project_audio["tracks"][index]
+                if destination is not track:
+                    track["clips"].remove(clip)
+                    destination["clips"].append(clip)
+            else:
+                info = self._analyze_project_audio(clip["path"])
+                clip.update(trim_audio(drag["clip"], drag["edge"], delta, info["duration"]))
+            self._audio_changed()
+
+    def _timeline_double(self, event):
+        kind, key, _x, _y = self._timeline_hit(event)
+        if kind == "scene":
+            self.open_edit_dialog(int(key))
+        elif kind == "audio":
+            self.show_audio_clip_properties(key)
+        elif kind == "track":
+            self.show_audio_track_properties(key)
+
+    def _timeline_menu(self, event):
+        kind, key, _x, _y = self._timeline_hit(event)
+        if kind == "scene":
+            self.media_menu(event, int(key))
+        elif kind == "audio":
+            self.audio_clip_menu(event, key)
+        elif kind == "track":
+            self.show_audio_track_properties(key)
