@@ -86,7 +86,7 @@ class InspectorMixin(SceneControlsMixin, InlineEditorsMixin):
         if self.project_caption_mode == "by_type":
             kind = getattr(self, "_design_media_type", "image")
             return [item for item in self.media_files if item[0] == kind]
-        targets = [self.media_files[i] for i in self._selected()]
+        targets = [self.media_files[i] for i in self._grouped_selection_indices()]
         _index, item = self._selected_item()
         return targets or ([item] if item is not None else [])
 

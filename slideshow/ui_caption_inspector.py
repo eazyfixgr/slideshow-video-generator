@@ -353,7 +353,8 @@ class CaptionInspectorMixin:
         individual = strategy == "individual"
         _index, item = self._selected_item()
         media = self.media_files
-        targets = [media[index] for index in self._selected()] if individual else []
+        targets = ([media[index] for index in self._grouped_selection_indices()]
+                   if individual else [])
         if individual and not targets and item is not None:
             targets = [item]
         focused = {"widget": None}

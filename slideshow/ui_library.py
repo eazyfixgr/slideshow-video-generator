@@ -166,6 +166,18 @@ class LibraryMixin:
     def _selected(self):
         return sorted(i for i in self.selected_indices if 0 <= i < len(self.media_files))
 
+    def _grouped_selection_indices(self):
+        """Selected scenes plus every scene in their media groups."""
+        selected = self._selected()
+        group_ids = {self.media_files[index][2].get("group_id")
+                     for index in selected if self.media_files[index][2].get("group_id")}
+        if not group_ids:
+            return selected
+        expanded = set(selected)
+        expanded.update(index for index, item in enumerate(self.media_files)
+                        if item[2].get("group_id") in group_ids)
+        return sorted(expanded)
+
     def _selected_library(self):
         return sorted(i for i in self.library_selected_indices
                       if 0 <= i < len(self.library_media))

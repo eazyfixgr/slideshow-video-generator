@@ -80,6 +80,25 @@ class AIDirectorTests(unittest.TestCase):
         self.assertEqual(self.app.media_files, original)
         self.assertEqual(self.app.settings["resolution"], "1080x1080")
 
+    def test_grouped_scene_applies_one_caption_to_all_group_media(self):
+        inventory = ensure_inventory(self.app)
+        plan = validate_plan(
+            {"title": "Ομάδα", "scenes": [{
+                "source_ids": [inventory[0]["id"], inventory[1]["id"]],
+                "duration": 3, "caption": "**Κοινό** caption",
+                "background_mode": "blur"}]},
+            inventory, "9:16", self.app.template_registry())
+        self.assertEqual(len(plan["scenes"]), 1)
+        apply_plan(self.app, plan)
+        self.assertEqual(len(self.app.media_files), 2)
+        first, second = self.app.media_files
+        self.assertEqual(first[2]["presentation"]["description"],
+                         "**Κοινό** caption")
+        self.assertEqual(second[2]["presentation"]["description"],
+                         "**Κοινό** caption")
+        self.assertEqual(first[2]["presentation"]["background_mode"], "blur")
+        self.assertEqual(first[2]["group_id"], second[2]["group_id"])
+
     def test_invalid_media_ids_are_rejected(self):
         with self.assertRaises(ValueError):
             validate_plan({"scenes": [{"source_id": "missing", "duration": 3}]},

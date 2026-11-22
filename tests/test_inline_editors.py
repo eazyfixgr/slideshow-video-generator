@@ -410,6 +410,22 @@ class InlineEditorTests(unittest.TestCase):
         self.assertEqual(widget.get("1.0", "end-1c"),
                          "bold accent μεγάλο")
 
+    def test_selecting_one_group_member_edits_the_whole_group(self):
+        for _kind, _path, edit in self.app.media_files:
+            edit["group_id"] = "group-one"
+        self.app.selected_indices = {0}
+        self.app._render_inspector()
+        self.caption_edit("Ομαδικό κείμενο")
+        self.app._commit_pending_caption_apply()
+        for _kind, _path, edit in self.app.media_files:
+            value = edit["presentation"]
+            self.assertEqual(value["description"], "Ομαδικό κείμενο")
+            self.assertEqual(value["title"], "")
+        self.app.selected_indices = {0}
+        self.app._set_inspector_view("design")
+        target_count = len(self.app._inspector_scope_targets())
+        self.assertEqual(target_count, 2)
+
     def test_design_background_override_applies_to_selected_images(self):
         self.app._set_inspector_view("design")
         background = next(w for w in self.widgets(ttk.Combobox)

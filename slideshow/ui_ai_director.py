@@ -244,9 +244,12 @@ class AIDirectorMixin:
             tk.Label(frame, text=plan["title"], bg=P["background"], fg=P["text"],
                      font=("Segoe UI", 15, "bold"), wraplength=700, justify="left").pack(
                 anchor="w")
-            total = sum(scene["duration"] for scene in plan["scenes"])
+            total = sum(scene["duration"] * max(1, len(scene.get("source_ids", [])))
+                        for scene in plan["scenes"])
+            media_count = sum(max(1, len(scene.get("source_ids", [])))
+                              for scene in plan["scenes"])
             tk.Label(frame, text=f"{plan['aspect']} · {total:.1f}s · "
-                                f"{len(plan['scenes'])} σκηνές" +
+                                f"{len(plan['scenes'])} σκηνές · {media_count} media" +
                                 (f" · {plan['template']}" if plan["template"] else ""),
                      bg=P["background"], fg=P["accent"], font=("Segoe UI", 9)).pack(
                 anchor="w", pady=(2, 8))
@@ -255,10 +258,18 @@ class AIDirectorMixin:
             scene_frame = tk.Frame(list_scroller.body, bg=P["background"])
             scene_frame.pack(fill="both", expand=True)
             for index, scene in enumerate(plan["scenes"], 1):
-                item = by_id.get(scene["source_id"], {})
+                items = [by_id[source_id] for source_id in scene.get("source_ids", [])
+                         if source_id in by_id]
+                if len(items) > 1:
+                    names = ", ".join(item["filename"] for item in items[:3])
+                    if len(items) > 3:
+                        names += f" +{len(items) - 3}"
+                    title = f"Ομάδα ({len(items)}): {names}"
+                else:
+                    title = items[0]["filename"] if items else "media"
                 row = tk.Frame(scene_frame, bg=P["raised"], padx=8, pady=6)
                 row.pack(fill="x", pady=2)
-                tk.Label(row, text=f"{index:02d}  {item.get('filename', 'media')}",
+                tk.Label(row, text=f"{index:02d}  {title}",
                          bg=P["raised"], fg=P["text"], font=("Segoe UI", 9, "bold"),
                          anchor="w").pack(fill="x")
                 tk.Label(row, text=f"{scene['duration']:.1f}s" +

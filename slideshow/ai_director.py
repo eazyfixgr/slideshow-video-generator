@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import re
+import uuid
 from pathlib import Path
 
 from .slide_design import normalize_presentation
@@ -67,8 +68,15 @@ def validate_plan(plan, inventory, current_aspect="9:16", registry=None):
     for raw in plan.get("scenes") or []:
         if not isinstance(raw, dict):
             continue
-        source_id = str(raw.get("source_id") or "")
-        if source_id not in by_id:
+        raw_ids = raw.get("source_ids")
+        if not isinstance(raw_ids, list):
+            raw_ids = [raw.get("source_id")]
+        source_ids = []
+        for source_id in raw_ids:
+            source_id = str(source_id or "")
+            if source_id in by_id and source_id not in source_ids:
+                source_ids.append(source_id)
+        if not source_ids:
             continue
         try:
             duration = max(1.0, min(30.0, float(raw.get("duration") or 3)))
@@ -79,7 +87,7 @@ def validate_plan(plan, inventory, current_aspect="9:16", registry=None):
             background = None
         caption = str(raw.get("caption") or "").strip()[:600]
         scenes.append({
-            "source_id": source_id,
+            "source_ids": source_ids,
             "duration": round(duration, 2),
             "caption": caption,
             "background_mode": background,
@@ -119,7 +127,7 @@ def build_messages(brief, inventory, options, vision=False):
         "Το JSON πρέπει να έχει αυτό το σχήμα:\n"
         '{"title":"...","aspect":"9:16|4:5|1:1|16:9",'
         '"target_duration":30,"template":null,"scenes":['
-        '{"source_id":"...","duration":3.0,"caption":"...",'
+        '{"source_ids":["..."],"duration":3.0,"caption":"...",'
         '"background_mode":null}]}'
     )
     payload = {
@@ -137,6 +145,9 @@ def build_messages(brief, inventory, options, vision=False):
         "- Διάλεξε 4 έως 12 σκηνές ανάλογα με το διαθέσιμο υλικό.\n"
         "- Σεβάσου τη συνολική διάρκεια (target_duration) όσο γίνεται.\n"
         "- Κάθε σκηνή 1–30 δευτερόλεπτα.\n"
+        "- Όταν 2+ media πρέπει να έχουν το ίδιο caption/design/διάρκεια, "
+        "βάλ' τα σε ΜΙΑ σκηνή με πολλά source_ids. Μην επαναλαμβάνεις το ίδιο "
+        "caption σε ξεχωριστές σκηνές.\n"
         "- Χρησιμοποίησε description όταν υπάρχει, αλλιώς filename/type.\n"
         "- Αν το template είναι null, άφησε το project template ως έχει.\n"
         "- Μην εφεύρεις media ή στοιχεία που δεν υπάρχουν.\n"
@@ -206,21 +217,25 @@ def apply_plan(app, plan):
     app.project_text_videos = ""
     app.project_text_photos = ""
     for scene in plan.get("scenes") or []:
-        item = by_id.get(scene.get("source_id"))
-        if item is None:
-            continue
-        kind, path = item["type"], item["path"]
-        _kind, _path, edit = app._new_item(kind, path)
-        edit["source_library_id"] = item["id"]
-        presentation = normalize_presentation(
-            edit.get("presentation"), project_template=app.project_template)
-        presentation.update(mode="custom", title="", subtitle="",
-                            description=str(scene.get("caption") or ""),
-                            duration=scene.get("duration"),
-                            background_mode=scene.get("background_mode"),
-                            transition="global", transition_duration=None)
-        edit["presentation"] = presentation
-        app.media_files.append((kind, path, edit))
+        source_ids = [source_id for source_id in (scene.get("source_ids") or [])
+                      if source_id in by_id]
+        group_id = uuid.uuid4().hex if len(source_ids) > 1 else ""
+        for source_id in source_ids:
+            item = by_id[source_id]
+            kind, path = item["type"], item["path"]
+            _kind, _path, edit = app._new_item(kind, path)
+            edit["source_library_id"] = item["id"]
+            if group_id:
+                edit["group_id"] = group_id
+            presentation = normalize_presentation(
+                edit.get("presentation"), project_template=app.project_template)
+            presentation.update(mode="custom", title="", subtitle="",
+                                description=str(scene.get("caption") or ""),
+                                duration=scene.get("duration"),
+                                background_mode=scene.get("background_mode"),
+                                transition="global", transition_duration=None)
+            edit["presentation"] = presentation
+            app.media_files.append((kind, path, edit))
     app.selected_indices = {0} if app.media_files else set()
     app._sel_anchor = 0 if app.media_files else None
     app.is_modified = True
