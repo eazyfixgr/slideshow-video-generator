@@ -389,6 +389,15 @@ class InlineEditorTests(unittest.TestCase):
         self.assertEqual(self.app.media_files[:2], before)
         self.assertEqual(self.app.media_files[2][2]["presentation"]["template_name"], name)
 
+    def test_window_guard_does_not_popup_errors_while_minimized(self):
+        self.assertTrue(getattr(self.app, "_window_restore_guard_installed", False))
+        calls = []
+        with patch("slideshow.app.messagebox.showerror",
+                   side_effect=lambda *a, **k: calls.append(a)):
+            self.app._report_callback_exception(ValueError, ValueError("test"), None)
+        self.assertEqual(calls, [])
+        self.assertIn("ValueError", self.app._pending_callback_error)
+
     def test_header_center_director_and_unified_ai_settings(self):
         self.assertTrue(hasattr(self.app, "ai_director_btn"))
         self.assertFalse(hasattr(self.app, "header_profile_name"))

@@ -165,6 +165,7 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         self.apply_ui_theme()
         self.setup_shortcuts()
         self._restore_window_state()
+        self._install_window_restore_guard()
 
         # Warm the LaMa erase model in the background: creating its ONNX
         # session costs ~20s, and doing it at startup means the user's first
@@ -200,6 +201,16 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
                 traceback.print_exception(exc, val, tb, file=self._crash_log_file)
         except Exception:
             pass
+        try:
+            state = self.root.state()
+        except tk.TclError:
+            state = "normal"
+        if state in ("iconic", "withdrawn"):
+            # Show Desktop / minimize can trigger stray callbacks. Keep them in
+            # the crash log instead of opening a modal dialog over a minimized
+            # window, which sometimes leaves Windows unable to restore the app.
+            self._pending_callback_error = f"{exc.__name__}: {val}"
+            return
         try:
             messagebox.showerror("Error", f"{exc.__name__}: {val}")
         except Exception:
@@ -300,6 +311,117 @@ class SlideshowApp(MediaEditMixin, RenderMixin, ExportMixin, LibraryMixin, Story
         except tk.TclError:
             pass
         self.settings["view_mode"] = self.view_mode.get()
+
+    # --------------------------------------------------- window restore guard
+    def _install_window_restore_guard(self):
+        """Recover the app after Windows Show Desktop / modal minimization."""
+        if getattr(self, "_window_restore_guard_installed", False):
+            return
+        self._window_restore_guard_installed = True
+        self._window_restore_job = None
+        self._window_restore_busy = False
+        self._last_modal = None
+        self._last_modal_had_grab = False
+        self._pending_callback_error = None
+        self.root.bind("<Map>", self._window_activity, add="+")
+        self.root.bind("<FocusIn>", self._window_activity, add="+")
+        self.root.bind_all("<Map>", self._window_activity, add="+")
+        self.root.bind_all("<FocusIn>", self._window_activity, add="+")
+        self.root.bind_all("<Unmap>", self._window_unmapped, add="+")
+
+    def _window_activity(self, event=None):
+        try:
+            top = event.widget.winfo_toplevel()
+            root_state = self.root.state()
+            top_state = top.state()
+        except (AttributeError, tk.TclError):
+            return
+        if root_state not in ("iconic", "withdrawn") and top_state not in (
+                "iconic", "withdrawn"):
+            return
+        self._schedule_window_restore()
+
+    def _window_unmapped(self, event=None):
+        try:
+            widget = event.widget
+            if widget is self.root or widget.winfo_toplevel() is not widget:
+                return
+            current = self.root.grab_current()
+        except (AttributeError, tk.TclError):
+            return
+        if current is not None and current is not self.root:
+            self._last_modal = current
+            try:
+                self._last_modal_had_grab = current.grab_status() in ("local", "global")
+                current.grab_release()
+            except tk.TclError:
+                self._last_modal_had_grab = False
+
+    def _schedule_window_restore(self):
+        if self._window_restore_job is not None:
+            return
+        try:
+            self._window_restore_job = self.root.after(
+                80, self._ensure_restored_windows)
+        except tk.TclError:
+            self._window_restore_job = None
+
+    def _ensure_restored_windows(self):
+        self._window_restore_job = None
+        if getattr(self, "_window_restore_busy", False):
+            return
+        self._window_restore_busy = True
+        try:
+            if getattr(self, "_root_hidden_until_welcome", False):
+                welcome = getattr(self, "_welcome_dialog", None)
+                if welcome is not None and welcome.winfo_exists():
+                    if welcome.state() == "iconic":
+                        welcome.deiconify()
+                    welcome.lift()
+                return
+            try:
+                root_state = self.root.state()
+            except tk.TclError:
+                root_state = "normal"
+            if root_state in ("iconic", "withdrawn"):
+                self.root.deiconify()
+                try:
+                    self.root.state("zoomed")
+                except tk.TclError:
+                    pass
+                self.root.lift()
+            try:
+                modal = self.root.grab_current()
+            except tk.TclError:
+                modal = None
+            if modal is None:
+                modal = self._last_modal
+            if (modal is not None and modal is not self.root and
+                    modal.winfo_exists()):
+                if modal.state() == "iconic":
+                    modal.deiconify()
+                modal.lift()
+                if self._last_modal_had_grab:
+                    try:
+                        modal.grab_set()
+                    except tk.TclError:
+                        pass
+        finally:
+            try:
+                self.root.after(140, self._finish_window_restore)
+            except tk.TclError:
+                self._window_restore_busy = False
+
+    def _finish_window_restore(self):
+        self._window_restore_busy = False
+        try:
+            if (not getattr(self, "_root_hidden_until_welcome", False) and
+                    self.root.state() == "iconic"):
+                self.root.deiconify()
+                self.root.state("zoomed")
+                self.root.lift()
+        except tk.TclError:
+            pass
 
 
 

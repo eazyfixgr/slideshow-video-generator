@@ -8,8 +8,9 @@ from tkinter import ttk, messagebox
 from .ai_director import (apply_plan, build_messages, ensure_inventory,
                           parse_plan, prepare_vision_images, validate_plan,
                           vision_message_parts)
+from .deps import Image, ImageTk
 from .ui_theme import MODERN_PALETTE as P
-from .ui_widgets import (ScrollFrame, aspect_label, flat_button,
+from .ui_widgets import (ScrollFrame, aspect_label, fit_cover, flat_button,
                          primary_button)
 
 
@@ -104,24 +105,200 @@ class AIDirectorMixin:
                            "Για καλύτερο αποτέλεσμα γράψε π.χ. «εξωτερικό, θάλασσα, ηλιοβασίλεμα».",
                  bg=P["background"], fg=P["muted"], font=("Segoe UI", 8),
                  wraplength=720, justify="left").pack(anchor="w", pady=(0, 4))
+        tk.Label(body, text="Πάτα σε μια μικρογραφία για μεγάλη προβολή και γράψε "
+                           "την περιγραφή της.",
+                 bg=P["background"], fg=P["muted"], font=("Segoe UI", 8),
+                 wraplength=720, justify="left").pack(anchor="w", pady=(0, 4))
         notes = {}
-        shown = 0
         for item in inventory:
-            if shown >= 40:
-                tk.Label(body, text=f"…και {len(inventory) - shown} ακόμη media",
-                         bg=P["background"], fg=P["muted"], font=("Segoe UI", 8)).pack(
-                    anchor="w", pady=(2, 0))
+            notes[item["id"]] = tk.StringVar(value=item.get("description", ""))
+
+        def persist_note(item_id, variable):
+            for _kind, _path, library_edit in self.library_media:
+                if library_edit.get("library_id") != item_id:
+                    continue
+                value = variable.get()
+                if library_edit.get("ai_description", "") != value:
+                    library_edit["ai_description"] = value
+                    self.is_modified = True
                 break
-            row = tk.Frame(body, bg=P["background"])
-            row.pack(fill="x", pady=1)
-            tk.Label(row, text=item["filename"][:42], width=42, anchor="w",
-                     bg=P["background"], fg=P["muted"], font=("Segoe UI", 8)).pack(
-                side="left")
-            var = tk.StringVar(value=item.get("description", ""))
-            notes[item["id"]] = var
-            ttk.Entry(row, textvariable=var).pack(
-                side="left", fill="x", expand=True, padx=(6, 0))
-            shown += 1
+
+        for item_id, variable in notes.items():
+            variable.trace_add(
+                "write", lambda *_args, i=item_id, v=variable: persist_note(i, v))
+
+        media_grid = tk.Frame(body, bg=P["background"])
+        media_grid.pack(fill="x", pady=(2, 8))
+        for column in range(3):
+            media_grid.columnconfigure(column, weight=1)
+        cards = {}
+
+        def open_viewer(start_index):
+            viewer = tk.Toplevel(dialog)
+            viewer.title("Περιγραφή media")
+            viewer.geometry("860x740")
+            viewer.minsize(620, 520)
+            viewer.transient(dialog)
+            viewer.grab_set()
+            content = tk.Frame(viewer, bg=P["background"], padx=14, pady=12)
+            content.pack(fill="both", expand=True)
+            header = tk.Frame(content, bg=P["background"])
+            header.pack(fill="x")
+            title_var = tk.StringVar()
+            tk.Label(header, textvariable=title_var, bg=P["background"],
+                     fg=P["text"], font=("Segoe UI", 11, "bold"), anchor="w").pack(
+                side="left", fill="x", expand=True)
+            image_label = tk.Label(content, bg=P["stage"], fg=P["muted"],
+                                   text="Φόρτωση...", height=24)
+            image_label.pack(fill="both", expand=True, pady=(6, 8))
+            current = {"index": max(0, min(len(inventory) - 1, start_index)),
+                       "id": None, "photo": None}
+            current_var = tk.StringVar()
+            entry = ttk.Entry(content, textvariable=current_var, font=("Segoe UI", 11))
+            entry.pack(fill="x", pady=(2, 4))
+            tk.Label(content, text="← / → αλλάζουν media όταν ο κέρσορας είναι στην "
+                                   "αρχή/τέλος του κειμένου. Enter = επόμενο.",
+                     bg=P["background"], fg=P["muted"], font=("Segoe UI", 8),
+                     wraplength=800, justify="left").pack(anchor="w", pady=(0, 6))
+
+            def sync_note(*_args):
+                if current["id"]:
+                    notes[current["id"]].set(current_var.get())
+            current_var.trace_add("write", sync_note)
+
+            def show(index):
+                index = max(0, min(len(inventory) - 1, index))
+                current["index"] = index
+                item = inventory[index]
+                current["id"] = item["id"]
+                current_var.set(notes[item["id"]].get())
+                title_var.set(f"{index + 1} / {len(inventory)}  ·  "
+                              f"{item['filename']}  ·  "
+                              f"{'ΒΙΝΤΕΟ' if item['type'] == 'video' else 'ΦΩΤΟΓΡΑΦΙΑ'}")
+                try:
+                    if item["type"] == "video":
+                        image = self._video_first_frame(item["path"])
+                    else:
+                        image = self.open_thumbnail_image(item["path"], 1100,
+                                                          apply_exif=True)
+                    if image is None:
+                        raise ValueError("no image")
+                    image = image.convert("RGB")
+                    image.thumbnail((800, 500), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(image, master=viewer)
+                    current["photo"] = photo
+                    image_label.configure(image=photo, text="", height=0)
+                except Exception:
+                    current["photo"] = None
+                    image_label.configure(image="", text="Δεν φορτώθηκε η εικόνα.",
+                                          height=24)
+                entry.focus_set()
+                entry.icursor("end")
+
+            def save_note():
+                if current["id"]:
+                    notes[current["id"]].set(current_var.get())
+
+            def previous():
+                save_note()
+                show(current["index"] - 1)
+
+            def following():
+                save_note()
+                show(current["index"] + 1)
+
+            def on_right(_event=None):
+                save_note()
+                if (current["index"] < len(inventory) - 1 and
+                        entry.index(tk.INSERT) >= len(entry.get())):
+                    following()
+                    return "break"
+                return None
+
+            def on_left(_event=None):
+                save_note()
+                if current["index"] > 0 and entry.index(tk.INSERT) <= 0:
+                    previous()
+                    return "break"
+                return None
+
+            def close_viewer():
+                save_note()
+                try:
+                    viewer.grab_release()
+                except tk.TclError:
+                    pass
+                viewer.destroy()
+
+            entry.bind("<Right>", on_right)
+            entry.bind("<Left>", on_left)
+            entry.bind("<Return>", lambda _e: (following(), "break")[1])
+            image_label.bind("<Button-1>", lambda _e: entry.focus_set())
+            image_label.bind("<Right>", lambda _e: (following(), "break")[1])
+            image_label.bind("<Left>", lambda _e: (previous(), "break")[1])
+            viewer.bind("<Escape>", lambda _e: (close_viewer(), "break")[1])
+            viewer.protocol("WM_DELETE_WINDOW", close_viewer)
+            buttons = tk.Frame(content, bg=P["background"])
+            buttons.pack(fill="x")
+            flat_button(buttons, "◀  Προηγούμενο", previous,
+                        background=P["raised"], foreground=P["text"],
+                        active_background=P["selected"]).pack(side="left")
+            flat_button(buttons, "Επόμενο  ▶", following,
+                        background=P["raised"], foreground=P["text"],
+                        active_background=P["selected"]).pack(side="left", padx=(6, 0))
+            flat_button(buttons, "Κλείσιμο", close_viewer,
+                        background=P["raised"], foreground=P["muted"],
+                        active_background=P["selected"]).pack(side="right")
+            show(current["index"])
+            viewer.lift()
+            viewer.focus_force()
+
+        for position, item in enumerate(inventory):
+            row, column = divmod(position, 3)
+            card = tk.Frame(media_grid, bg=P["raised"], padx=4, pady=4,
+                            highlightthickness=1, highlightbackground=P["border"])
+            card.grid(row=row, column=column, sticky="nsew", padx=3, pady=3)
+            holder = tk.Frame(card, bg=P["stage"], width=190, height=108)
+            holder.pack(fill="x")
+            holder.pack_propagate(False)
+            thumb = tk.Label(holder, bg=P["stage"], fg=P["muted"],
+                             text="▶" if item["type"] == "video" else "…",
+                             font=("Segoe UI", 14), cursor="hand2")
+            thumb.pack(fill="both", expand=True)
+            tk.Label(card, text=item["filename"][:32], bg=P["raised"],
+                     fg=P["muted"], font=("Segoe UI", 8), anchor="w").pack(
+                fill="x", pady=(3, 1))
+            ttk.Entry(card, textvariable=notes[item["id"]]).pack(fill="x")
+            thumb.bind("<Button-1>", lambda _e, i=position: open_viewer(i))
+            cards[item["id"]] = (thumb, holder)
+
+        def apply_thumbnail(item_id, image):
+            entry = cards.get(item_id)
+            if entry is None or not dialog.winfo_exists():
+                return
+            thumb, _holder = entry
+            try:
+                photo = ImageTk.PhotoImage(fit_cover(image, 190, 108),
+                                           master=dialog)
+                thumb._director_photo = photo
+                thumb.configure(image=photo, text="")
+            except tk.TclError:
+                pass
+
+        def load_thumbnails():
+            for item in inventory:
+                try:
+                    if item["type"] == "video":
+                        image = self._video_first_frame(item["path"])
+                    else:
+                        image = self.open_thumbnail_image(item["path"], 360,
+                                                          apply_exif=True)
+                    if image is not None:
+                        self._post_ui(apply_thumbnail, item["id"], image)
+                except Exception:
+                    continue
+
+        threading.Thread(target=load_thumbnails, daemon=True).start()
 
         status = tk.StringVar(value="")
         tk.Label(body, textvariable=status, bg=P["background"], fg=P["accent"],
