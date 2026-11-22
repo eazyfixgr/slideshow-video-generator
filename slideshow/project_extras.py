@@ -18,6 +18,8 @@ class ProjectExtrasMixin:
         self._timeline_audio_key = None
         self._timeline_display_tracks = []
         self._timeline_waveforms = {}
+        self._timeline_duration_pending = set()
+        self._timeline_duration_attempted = set()
         self._playhead_seconds = 0.0
         self._refresh_chat_history()
 
@@ -37,7 +39,7 @@ class ProjectExtrasMixin:
     def _project_extra_data(self):
         audio = normalize_audio(getattr(self, "project_audio", empty_audio()))
         cache = getattr(self, "_automatic_audio_cache", None)
-        if audio["mode"] == "auto" and cache:
+        if audio["mode"] == "auto" and not audio.get("tracks") and cache:
             audio["tracks"] = copy.deepcopy(cache["tracks"])
         return {"project_audio": audio,
                 "ai_chat_history": copy.deepcopy(getattr(self, "ai_chat_history", []))[-200:],

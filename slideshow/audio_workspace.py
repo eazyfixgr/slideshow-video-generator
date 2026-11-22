@@ -1,17 +1,73 @@
-"""Shared project music plan, audio analysis cache and source-video audio."""
+﻿"""Shared project music plan, audio analysis cache and source-video audio."""
 
 import copy
 import json
+import os
 import threading
 from pathlib import Path
 
-from .audio_engine import analyze_audio, automatic_music
-from .timeline_model import audio_clip, empty_audio, scene_timing
+from .audio_engine import analyze_audio, automatic_music, extend_music
+from .timeline_model import audio_clip, empty_audio, normalize_audio, scene_timing
 
 
 class AudioWorkspaceMixin:
     def timeline_layout(self):
-        return scene_timing(self._estimate_export_clips(), self.settings)
+        return scene_timing(self._timeline_media_clips(), self.settings)
+
+    def _timeline_media_clips(self):
+        """Never probe a video on the Tk thread while opening/rendering a project."""
+        default = float(self.settings.get("slide_duration", 3) or 3)
+        clips = []
+        for kind, path, edit in self.media_files:
+            presentation = self._presentation_for(edit)
+            if kind == "image":
+                duration = presentation["duration"] or default
+            else:
+                full = self._video_dur_cache.get(str(path))
+                if full:
+                    kept = sum(length for _start, length in
+                               self.video_keep_segments(edit, full))
+                    duration = min(kept, presentation["duration"]) if presentation["duration"] else kept
+                else:
+                    duration = presentation["duration"] or default
+                    self._queue_timeline_video_duration(path)
+            clips.append({"type": "video" if kind == "video" else "image",
+                          "duration": max(.1, float(duration or default)),
+                          "transition": presentation.get("transition", "global"),
+                          "transition_duration": presentation.get("transition_duration")})
+        return clips
+
+    def _queue_timeline_video_duration(self, path):
+        key = str(path)
+        if not hasattr(self, "_timeline_duration_pending"):
+            self._timeline_duration_pending = set()
+            self._timeline_duration_attempted = set()
+        if key in self._timeline_duration_pending or key in self._timeline_duration_attempted:
+            return
+        self._timeline_duration_pending.add(key)
+        token = getattr(self, "_session_id", None)
+
+        def worker():
+            try:
+                duration = self._video_duration(key)
+            except Exception:
+                duration = 0
+            self._post_ui(self._timeline_duration_ready, token, key, duration)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _timeline_duration_ready(self, token, path, duration):
+        self._timeline_duration_pending.discard(path)
+        self._timeline_duration_attempted.add(path)
+        if token != getattr(self, "_session_id", None):
+            return
+        if duration and duration > 0:
+            self._video_dur_cache[path] = duration
+            self._timeline_audio_key = None
+            if hasattr(self, "storyboard_canvas"):
+                self.render_storyboard()
+            refresh = getattr(self, "_refresh_export_estimate", None)
+            if refresh:
+                refresh()
 
     def _analyze_project_audio(self, path, trim=False):
         path = Path(path)
@@ -34,16 +90,22 @@ class AudioWorkspaceMixin:
                             for clip in track["clips"]), default=0)
             if coverage >= duration - .05:
                 return copy.deepcopy(audio["tracks"])
-        settings_key = json.dumps({key: self.settings.get(key) for key in (
-            "music_folder", "volume_db", "crossfade_duration", "trim_silence")}, sort_keys=True)
+            token = getattr(self, "_session_id", None)
+            extended = extend_music(audio["tracks"], self.settings, self.music_tracker,
+                                    duration, self._analyze_project_audio)
+            if token == getattr(self, "_session_id", None):
+                self._automatic_audio_cache = {"key": "project-plan",
+                                               "duration": duration, "tracks": extended}
+            return extended
         cached = getattr(self, "_automatic_audio_cache", None)
-        if cached and cached["key"] == settings_key and cached["duration"] >= duration - .05:
+        if cached and cached.get("duration", 0) >= duration - .05:
             return copy.deepcopy(cached["tracks"])
         token = getattr(self, "_session_id", None)
         tracks = automatic_music(self.settings, self.music_tracker, duration,
                                  self._analyze_project_audio) if duration > 0 else []
         if token == getattr(self, "_session_id", None):
-            self._automatic_audio_cache = {"key": settings_key, "duration": duration, "tracks": tracks}
+            self._automatic_audio_cache = {"key": "project-plan", "duration": duration,
+                                           "tracks": tracks}
         return copy.deepcopy(tracks)
 
     def _manual_audio(self):
@@ -54,6 +116,27 @@ class AudioWorkspaceMixin:
             self.project_audio = {"version": 1, "mode": "manual",
                                   "tracks": self.project_audio_plan(duration)}
         return self.project_audio
+
+    def _persist_project_audio(self):
+        """Remember the automatic song plan without overwriting unsaved edits."""
+        path = getattr(self, "current_project", None)
+        if not path:
+            return False
+        path = Path(path)
+        if not path.is_file():
+            return False
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict):
+                return False
+            data["project_audio"] = normalize_audio(
+                getattr(self, "project_audio", empty_audio()))
+            temporary = path.with_name(path.name + ".tmp")
+            temporary.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            os.replace(temporary, path)
+            return True
+        except (OSError, ValueError, TypeError):
+            return False
 
     def _audio_changed(self):
         self.is_modified = True

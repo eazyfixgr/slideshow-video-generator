@@ -1,4 +1,4 @@
-"""Time-scaled visual/audio timeline, replacing the equal-width storyboard strip."""
+﻿"""Time-scaled visual/audio timeline, replacing the equal-width storyboard strip."""
 
 import copy
 import threading
@@ -77,17 +77,6 @@ class StoryboardMixin(AudioWorkspaceMixin, AudioTracksMixin, TimelinePlaybackMix
         canvas.bind("<Configure>", lambda _e: self.render_storyboard())
         return frame
 
-    def _scene_seconds(self, item):
-        p = normalize_presentation(item[2].get("presentation"))
-        if item[0] == "image":
-            return float(p["duration"] or self.settings.get("slide_duration", 3))
-        full = self._video_dur_cache.get(str(item[1]))
-        if full is None:
-            full = self._video_duration(item[1])
-            self._video_dur_cache[str(item[1])] = full
-        kept = sum(length for _offset, length in self.video_keep_segments(item[2], full))
-        return min(kept, p["duration"]) if p["duration"] else kept
-
     def _timeline_fit_all(self):
         self._timeline_fit = True
         self.render_storyboard()
@@ -163,9 +152,10 @@ class StoryboardMixin(AudioWorkspaceMixin, AudioTracksMixin, TimelinePlaybackMix
                 image = fit_cover(image, max(1, min(124, int(x2 - x1 - 4))), 44)
                 photo = ImageTk.PhotoImage(image, master=self.root)
                 self._sb_photo_refs[index] = photo
-                canvas.create_image(x1 + 2, VISUAL_TOP + 2, anchor="nw", image=photo, tags=tag)
+                canvas.create_image(x1 + 2, VISUAL_TOP + 2, anchor="nw", image=photo,
+                                    tags=(f"thumb:{index}", tag))
             elif thumb_key not in self._sb_pending:
-                self._queue_scene_thumb(item, thumb_key)
+                self._queue_scene_thumb(index, item, thumb_key)
             if timing["overlap"]:
                 canvas.create_rectangle(x1, VISUAL_TOP, x1 + timing["overlap"] * scale, VISUAL_BOTTOM,
                                         outline=P["accent"], dash=(3, 3), tags=tag)
@@ -205,14 +195,31 @@ class StoryboardMixin(AudioWorkspaceMixin, AudioTracksMixin, TimelinePlaybackMix
         self._update_timeline_clock_label(total)
         self._queue_timeline_audio(total)
 
-    def _queue_scene_thumb(self, item, key):
+    def _queue_scene_thumb(self, index, item, key):
         self._sb_pending.add(key)
         token = self._session_id
+
         def receive(image):
+            if token != self._session_id:
+                return
             self._sb_pending.discard(key)
-            if token == self._session_id:
-                self._sb_thumb_cache[key] = image
-                self.render_storyboard()
+            self._sb_thumb_cache[key] = image
+            canvas = self.storyboard_canvas
+            try:
+                rectangles = [entry for entry in canvas.find_withtag(f"scene:{index}")
+                              if canvas.type(entry) == "rectangle"]
+                if not rectangles:
+                    return
+                x1, y1, x2, _y2 = canvas.coords(rectangles[0])
+                width = max(1, min(124, int(x2 - x1 - 4)))
+                photo = ImageTk.PhotoImage(fit_cover(image, width, 44), master=self.root)
+                self._sb_photo_refs[index] = photo
+                canvas.delete(f"thumb:{index}")
+                canvas.create_image(x1 + 2, y1 + 2, anchor="nw", image=photo,
+                                    tags=(f"thumb:{index}", f"scene:{index}"))
+            except tk.TclError:
+                pass
+
         def worker():
             try:
                 kind, path, edit = item
@@ -220,7 +227,8 @@ class StoryboardMixin(AudioWorkspaceMixin, AudioTracksMixin, TimelinePlaybackMix
                 image = self._apply_image_edit(image.copy(), {k: v for k, v in edit.items() if k != "erase"}, path, m_type=kind)
                 self._post_ui(receive, fit_cover(image, 124, 44))
             except Exception:
-                self._sb_pending.discard(key)
+                if token == self._session_id:
+                    self._sb_pending.discard(key)
         threading.Thread(target=worker, daemon=True).start()
 
     def _draw_track_labels(self):

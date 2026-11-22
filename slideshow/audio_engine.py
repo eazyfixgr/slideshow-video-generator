@@ -1,5 +1,6 @@
 """Audio analysis, deterministic automatic music and shared multitrack mixer."""
 
+import copy
 import hashlib
 import json
 import subprocess
@@ -70,6 +71,46 @@ def automatic_music(settings, tracker, duration, analyze):
         position = start + length
         previous_duration = length
     return [track] if track["clips"] else []
+
+
+def extend_music(tracks, settings, tracker, duration, analyze):
+    """Append songs after an existing project plan; never replace old clips."""
+    tracks = copy.deepcopy(tracks)
+    track = next((item for item in tracks if item.get("name") == "Αυτόματη μουσική"),
+                 tracks[0] if tracks else None)
+    if track is None or not track.get("clips"):
+        return automatic_music(settings, tracker, duration, analyze)
+    clips = track["clips"]
+    position = max(clip["start"] + clip["duration"] for clip in clips)
+    if position >= duration - .05:
+        return tracks
+    folder = Path(settings.get("music_folder") or ".")
+    names = list(tracker.get("available_music", []))
+    chosen = {str(Path(clip["path"]).resolve()) for clip in clips}
+    order = [name for name in names
+             if str((folder / name).resolve()) not in chosen] or names[:]
+    guard = 0
+    while order and position < duration and guard < 300:
+        guard += 1
+        path = folder / order.pop(0)
+        if not path.is_file():
+            continue
+        info = analyze(path, bool(settings.get("trim_silence")))
+        length = info["usable"]
+        previous = clips[-1]
+        cross = min(float(settings.get("crossfade_duration", 0) or 0),
+                    max(0, min(previous["duration"], length) / 2))
+        start = max(0.0, position - cross)
+        previous["fade_out"] = cross
+        clips.append(audio_clip(str(path), length, start, offset=info["offset"],
+                                fade_in=cross))
+        chosen.add(str(path.resolve()))
+        position = start + length
+        if not order and position < duration:
+            last = str(Path(clips[-1]["path"]).resolve())
+            order = [name for name in names
+                     if str((folder / name).resolve()) != last] or names[:]
+    return tracks
 
 
 def mix_command(tracks, duration, output, video_clips=None):

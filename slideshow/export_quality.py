@@ -38,17 +38,16 @@ class ExportQualityMixin:
                 cache_key = str(path)
                 source_duration = (duration_cache.get(cache_key)
                                    if duration_cache is not None else None)
-                if source_duration is None:
-                    source_duration = self._video_duration(path)
-                    if duration_cache is not None:
-                        duration_cache[cache_key] = source_duration
-                if source_duration > 0:
+                if not source_duration:
+                    queue = getattr(self, "_queue_timeline_video_duration", None)
+                    if queue:
+                        queue(path)
+                    duration = presentation["duration"] or default_image_duration
+                else:
                     duration = sum(length for _start, length in
                                    self.video_keep_segments(edit, source_duration))
-                else:
-                    duration = default_image_duration
-                if presentation["duration"] is not None:
-                    duration = min(duration, presentation["duration"])
+                    if presentation["duration"] is not None:
+                        duration = min(duration, presentation["duration"])
             clips.append({
                 "type": "video" if media_type == "video" else "image",
                 "duration": max(0.1, float(duration)),

@@ -22,6 +22,7 @@ import numpy as np
 from slideshow.ai_chat import apply_chat_edits, project_context
 from slideshow.app import SlideshowApp
 from slideshow.audio_engine import analyze_audio, automatic_music, mix_command
+from slideshow.slide_design import normalize_presentation
 from slideshow.timeline_model import (audio_clip, new_track, normalize_audio,
                                       scene_timing, source_time, trim_audio)
 from slideshow.ui_storyboard import ORIGIN, AUDIO_TOP, LANE
@@ -332,6 +333,59 @@ class ChatAndProjectTests(unittest.TestCase):
         self.assertGreater(rms(.1, .3), .02)
         self.assertLess(rms(.65, .85), .002)
         self.assertGreater(rms(1.2, 1.4), .02)
+
+    def test_video_duration_is_never_probed_while_building_timeline(self):
+        self.app.media_files.append(("video", str(self.directory / "remote.mp4"), {
+            "presentation": normalize_presentation({"duration": 3})}))
+        with patch.object(self.app, "_video_duration",
+                          side_effect=AssertionError("blocked Tk thread")), \
+                patch.object(self.app, "_queue_timeline_video_duration"):
+            layout, total = self.app.timeline_layout()
+            clips = self.app._estimate_export_clips()
+        self.assertTrue(layout)
+        self.assertGreater(total, 0)
+        self.assertEqual(len(clips), len(self.app.media_files))
+
+    def test_automatic_music_plan_is_frozen_and_only_extended(self):
+        first = self.directory / "one.wav"
+        second = self.directory / "two.wav"
+        third = self.directory / "three.wav"
+        for index, path in enumerate((first, second, third)):
+            tone(path, 1, 300 + index * 100)
+        self.app.settings.update(music_folder=str(self.directory), trim_silence=False,
+                                  crossfade_duration=0)
+        self.app.music_tracker = {"available_music": [first.name, second.name, third.name],
+                                  "used_music": []}
+        self.app.project_audio = {"mode": "auto", "version": 1, "tracks": []}
+        self.app._automatic_audio_cache = None
+        initial = self.app.project_audio_plan(2.0)
+        self.assertTrue(initial)
+        first_path = Path(initial[0]["clips"][0]["path"]).name
+        first_start = initial[0]["clips"][0]["start"]
+        # Simulate the project remembering the plan.
+        self.app.project_audio["tracks"] = copy.deepcopy(initial)
+        same = self.app.project_audio_plan(1.5)
+        self.assertEqual(same[0]["clips"][0]["path"], initial[0]["clips"][0]["path"])
+        self.assertEqual(same[0]["clips"][0]["start"], first_start)
+        extended = self.app.project_audio_plan(4.0)
+        self.assertEqual(Path(extended[0]["clips"][0]["path"]).name, first_path)
+        self.assertEqual(extended[0]["clips"][0]["start"], first_start)
+        self.assertGreater(len(extended[0]["clips"]), len(initial[0]["clips"]))
+        # Existing clips keep their old positions; only new clips are appended.
+        for old, new in zip(initial[0]["clips"], extended[0]["clips"]):
+            self.assertEqual((old["path"], old["start"], old["duration"]),
+                             (new["path"], new["start"], new["duration"]))
+
+    def test_auto_audio_plan_is_written_to_project_file(self):
+        path = self.directory / "saved_project.json"
+        path.write_text(json.dumps({"name": "x", "media_files": []}), encoding="utf-8")
+        self.app.current_project = path
+        self.app.project_audio = {"mode": "auto", "version": 1, "tracks": [
+            new_track("Αυτόματη μουσική", id="auto-music", clips=[
+                audio_clip(str(self.directory / "one.wav"), 2, 0)])]}
+        self.assertTrue(self.app._persist_project_audio())
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["project_audio"]["tracks"][0]["clips"][0]["start"], 0)
 
 
 if __name__ == "__main__":

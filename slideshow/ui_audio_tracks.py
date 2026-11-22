@@ -29,6 +29,10 @@ class AudioTracksMixin:
             self._timeline_waveforms = information
             if error:
                 self.status.configure(text=f"Ήχος: {error}")
+            elif (self.project_audio.get("mode") == "auto" and tracks and
+                  self.project_audio.get("tracks") != tracks):
+                self.project_audio["tracks"] = copy.deepcopy(tracks)
+                self._persist_project_audio()
             self.render_storyboard()
 
         def worker():
