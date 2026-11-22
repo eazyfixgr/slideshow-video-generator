@@ -147,7 +147,10 @@ class RenderMixin:
         frame, overflow = compose_design_frame(
             source, width, height, presentation, fields, before_image=before,
             auto_position_video=below_media,
-            video_fill_mode=self.settings.get("video_auto_position_fill", "panel"))
+            video_fill_mode=self.settings.get("video_auto_position_fill", "panel"),
+            video_blur_contain=(m_type == "video" and
+                                self._slide_background_mode(presentation) == "blur" and
+                                not self.settings.get("cropping")))
         return frame, overflow
 
 

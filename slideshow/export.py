@@ -21,7 +21,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhance,
                    VideoFileClip, AudioFileClip, concatenate_audioclips, np,
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
-from .slide_design import render_design_layers
+from .slide_design import _blurred_cover, render_design_layers
 from .export_quality import ExportQualityMixin
 from .export_live_preview import ExportLivePreviewMixin
 from .audio_export import AudioExportMixin
@@ -291,9 +291,14 @@ class ExportMixin(AudioExportMixin, ExportQualityMixin, ExportLivePreviewMixin):
                             video_source=first_f)
                         if overflow:
                             self._log_export(f"item {i}: design text exceeds the template safe area")
+                        x, y, rw, rh = rect
+                        blur_contain = (not auto_position_video and
+                                        self._slide_background_mode(presentation) == "blur" and
+                                        not self.settings.get("cropping"))
+                        if blur_contain:
+                            base.paste(_blurred_cover(first_f, (rw, rh)), (x, y))
                         base.save(str(bg_p), "PNG")
                         txt_overlay.save(str(txt_p), "PNG")
-                        x, y, rw, rh = rect
                         rotate_part = self.video_rotate_filter(edit)
                         crop_part = self.video_crop_filter(edit)
                         color_part = self.video_color_filter(edit)
@@ -301,6 +306,11 @@ class ExportMixin(AudioExportMixin, ExportQualityMixin, ExportLivePreviewMixin):
                             size_part = (f"scale={rw}:{rh}:force_original_aspect_ratio=decrease,"
                                          "setsar=1,format=rgba")
                             overlay_position = f"{x}+(W-w)/2:{y}"
+                        elif blur_contain:
+                            size_part = (f"scale={rw}:{rh}:force_original_aspect_ratio=decrease,"
+                                         "setsar=1,format=rgba")
+                            overlay_position = (f"{x}+(W-w)/2:"
+                                                f"{y}+(H-h)/2")
                         else:
                             size_part = (f"scale={rw}:{rh}:force_original_aspect_ratio=increase,"
                                          f"crop={rw}:{rh},setsar=1,format=rgba")

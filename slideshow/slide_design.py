@@ -1,4 +1,4 @@
-"""Per-slide presentation data and reusable, resolution-independent templates.
+﻿"""Per-slide presentation data and reusable, resolution-independent templates.
 
 The compositor deliberately keeps the source media separate from its graphic
 layers.  A still image and an FFmpeg video frame use the same geometry and
@@ -313,6 +313,12 @@ def _fit_image(source, size):
     x = max(0, (resized.width - tw) // 2)
     y = max(0, (resized.height - th) // 2)
     return resized.crop((x, y, x + tw, y + th))
+
+
+def _blurred_cover(source, size):
+    width, height = max(1, int(size[0])), max(1, int(size[1]))
+    return _fit_image(source, (width, height)).filter(
+        ImageFilter.GaussianBlur(max(8, int(min(width, height) * .035))))
 
 
 def _contain_image(source, size):
@@ -814,7 +820,8 @@ def _draw_content(draw, box, fields, p, accent, white, margin, measure_only=Fals
 
 
 def compose_design_frame(source, width, height, presentation, fields, before_image=None,
-                         auto_position_video=False, video_fill_mode="panel"):
+                         auto_position_video=False, video_fill_mode="panel",
+                         video_blur_contain=False):
     """Compose one actual media frame using the same reusable template layers."""
     base, overlay, rect, overflow = render_design_layers(
         width, height, presentation, fields, before_image=before_image,
@@ -823,11 +830,17 @@ def compose_design_frame(source, width, height, presentation, fields, before_ima
     result = base.copy()
     x, y, rw, rh = rect
     if source is not None and rw > 0 and rh > 0:
-        fitted = (_contain_image(source, (rw, rh)) if auto_position_video else
-                  _fit_image(source, (rw, rh)))
-        px = x + max(0, (rw - fitted.width) // 2)
-        py = (y if auto_position_video else
-              y + max(0, (rh - fitted.height) // 2))
-        result.paste(fitted, (px, py))
+        if video_blur_contain and not auto_position_video:
+            result.paste(_blurred_cover(source, (rw, rh)), (x, y))
+            fitted = _contain_image(source, (rw, rh))
+            result.paste(fitted, (x + (rw - fitted.width) // 2,
+                                  y + (rh - fitted.height) // 2))
+        else:
+            fitted = (_contain_image(source, (rw, rh)) if auto_position_video else
+                      _fit_image(source, (rw, rh)))
+            px = x + max(0, (rw - fitted.width) // 2)
+            py = (y if auto_position_video else
+                  y + max(0, (rh - fitted.height) // 2))
+            result.paste(fitted, (px, py))
     result = Image.alpha_composite(result.convert("RGBA"), overlay).convert("RGB")
     return result, overflow

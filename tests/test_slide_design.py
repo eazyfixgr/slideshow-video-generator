@@ -197,6 +197,19 @@ class PresentationModelTests(unittest.TestCase):
         self.assertNotIn("**", "".join(segment[0] for segment in segments))
         self.assertGreaterEqual(len(lines), 2)
 
+    def test_design_video_blur_contain_adds_blurred_bars(self):
+        source = Image.new("RGB", (160, 90), "#2050D0")
+        source.paste(Image.new("RGB", (160, 45), "#D02050"), (0, 0))
+        presentation = normalize_presentation({"template": "cinematic"})
+        cover, _ = compose_design_frame(source, 200, 200, presentation, {})
+        contained, _ = compose_design_frame(
+            source, 200, 200, presentation, {}, video_blur_contain=True)
+        self.assertNotEqual(cover.tobytes(), contained.tobytes())
+        # The video is only 112px tall inside the square; the bars must not be
+        # the plain template background.
+        self.assertNotEqual(contained.getpixel((100, 10)),
+                            contained.getpixel((100, 100)))
+
     def test_audio_offsets_match_mixed_transition_overlaps(self):
         offsets = ExportMixin._clip_offsets(
             None, [2.0, 3.0, 4.0], transitions=[("none", 0.0), ("fade", 0.5), ("none", 0.0)])
