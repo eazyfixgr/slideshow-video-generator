@@ -375,6 +375,28 @@ class ChatAndProjectTests(unittest.TestCase):
         self.assertEqual(spans.get("Outer"), 3)
         widget.destroy()
 
+    def test_fit_and_move_photos_stay_fit_and_move_with_auto_position_photos(self):
+        source = Image.new("RGB", (320, 180), "#305070")
+        edit = self.app._new_item("image", str(self.directory / "photo.png"))[2]
+        edit["presentation"] = normalize_presentation({
+            "template": "navy_gold", "text_layout": "below", "mode": "none"})
+        self.app.settings.update({
+            "auto_position_photos": True,
+            "auto_position_videos": False,
+            "background_mode": "fit_and_move",
+            "watermark_enabled": False,
+        })
+        presentation = self.app._presentation_for(edit)
+        with patch.object(self.app, "_render_design_frame",
+                          side_effect=AssertionError("auto position used")):
+            preview = self.app._render_design_fitmove_preview(
+                source, edit, "image", 270, 480, presentation)
+        rendered, _overflow = self.app._render_design_frame(
+            source, edit, "image", 270, 480)
+        self.assertEqual(preview.size, rendered.size)
+        self.assertNotEqual(preview.convert("RGB").tobytes(),
+                            rendered.convert("RGB").tobytes())
+
     def test_auto_position_video_preview_matches_the_renderer(self):
         source = Image.new("RGB", (320, 180), "#305070")
         edit = self.app._new_item("video", str(self.directory / "new-video.mp4"))[2]

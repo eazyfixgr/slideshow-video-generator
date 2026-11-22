@@ -125,10 +125,9 @@ class PreviewMixin:
         if m_type == "video":
             below_media = (layout == "below" or
                            bool(self.settings.get("auto_position_videos", False)))
-        else:
-            below_media = (layout == "below" if layout else
-                           bool(self.settings.get("auto_position_photos", False)))
-        if below_media or self._slide_background_mode(presentation) != "fit_and_move":
+            if below_media:
+                return self._render_design_frame(img, edit, m_type, w, h)[0]
+        if self._slide_background_mode(presentation) != "fit_and_move":
             return self._render_design_frame(img, edit, m_type, w, h)[0]
         fields = self._presentation_fields(presentation, m_type)
         before = self._presentation_before_image(presentation, fallback=img)
