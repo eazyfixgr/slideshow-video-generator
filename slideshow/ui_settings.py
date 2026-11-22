@@ -20,9 +20,10 @@ from .deps import (Image, ImageTk, ImageFilter, ImageDraw, ImageFont, ImageEnhan
                    DND_FILES, TkinterDnD, TKDND_AVAILABLE)
 from .ui_color_controls import ColorControls
 from .ui_theme import MODERN_PALETTE as P
+from .ui_updates import UpdatesMixin
 
 
-class SettingsMixin:
+class SettingsMixin(UpdatesMixin):
     """The Settings menus and the watermark/logo dialogs."""
 
     def setup_menu(self):
@@ -54,6 +55,7 @@ class SettingsMixin:
         settings_menu.add_command(label="Video Settings", command=self.show_video_settings)
         settings_menu.add_command(label="Photo Settings", command=self.show_photo_settings)
         settings_menu.add_command(label="AI Settings...", command=self.show_ai_settings)
+        settings_menu.add_command(label="Ενημερώσεις...", command=self.show_updates)
         settings_menu.add_command(label="Watermark / Logo Settings", command=self.show_watermark_settings)
         settings_menu.add_command(label="Project Watermark / Logo (override)",
                                   command=self.show_project_watermark)

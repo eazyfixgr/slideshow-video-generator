@@ -9,6 +9,8 @@
 Η παλιά μονολιθική έκδοση φυλάσσεται στο
 ``old/slideshow_app v4 (single file, πριν το σπάσιμο).py``.
 """
+import argparse
+import json
 import sys
 import queue
 import threading
@@ -27,6 +29,10 @@ except ImportError:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Slideshow Video Creator Pro")
+    parser.add_argument("--update-ready", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--smoke-test-dir", type=Path, help=argparse.SUPPRESS)
+    args = parser.parse_args()
     root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
     root.withdraw()
 
@@ -72,8 +78,11 @@ def main():
     def import_application():
         try:
             from slideshow import deps as _deps
-            from slideshow.app import SlideshowApp
-            loaded.put((SlideshowApp, None))
+            from slideshow import app as app_module
+            if args.smoke_test_dir:
+                # Used to verify portable builds without touching a real profile.
+                app_module.APP_DIR = args.smoke_test_dir.resolve()
+            loaded.put((app_module.SlideshowApp, None))
         except BaseException as exc:
             loaded.put((None, exc))
 
@@ -111,6 +120,12 @@ def main():
             splash.destroy()
             app._root_hidden_until_welcome = True
             app.show_welcome_screen()
+            if args.update_ready:
+                from slideshow.version import installed_version
+                args.update_ready.write_text(json.dumps({"version": installed_version()}),
+                                             encoding="utf-8")
+            if args.smoke_test_dir:
+                root.after(1500, root.destroy)
 
         root.after(remaining, finish_startup)
 

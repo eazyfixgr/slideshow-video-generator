@@ -409,6 +409,35 @@ class InlineEditorTests(unittest.TestCase):
         self.assertEqual(len(notebooks[0].tabs()), 3)
         dialog.destroy()
 
+    def test_updates_dialog_reports_installed_and_available_version(self):
+        from slideshow.version import installed_version
+        release = {"version": installed_version(), "notes": "Release notes", "assets": {}}
+        # The check still runs on its worker thread; callbacks are drained by Tk.
+        callbacks = []
+        with patch("slideshow.ui_updates.latest_release", return_value=release), \
+                patch.object(self.app, "_post_ui", side_effect=lambda *args: callbacks.append(args)):
+            dialog = self.app.show_updates()
+            import time
+            limit = time.monotonic() + 3
+            while not callbacks and time.monotonic() < limit:
+                time.sleep(.01)
+            self.assertTrue(callbacks)
+            for callback, *arguments in callbacks:
+                callback(*arguments)
+            texts = []
+
+            def visit(widget):
+                if isinstance(widget, ttk.Label):
+                    variable = widget.cget("textvariable")
+                    texts.append(widget.getvar(str(variable)) if variable else widget.cget("text"))
+                for child in widget.winfo_children():
+                    visit(child)
+
+            visit(dialog)
+            self.assertIn("Η εφαρμογή είναι ενημερωμένη.", texts)
+            self.assertIn(f"Διαθέσιμη έκδοση: {installed_version()}", texts)
+            dialog.destroy()
+
     def test_clear_formatting_removes_markup_from_caption(self):
         widget = self.widgets(tk.Text)[0]
         widget.delete("1.0", "end")

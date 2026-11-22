@@ -2,11 +2,11 @@
 #  Slideshow Video Creator Pro - build a standalone Windows .exe
 #
 #  Double-click build_exe.bat (or run this file) and it will:
-#    1. bump the version (e.g. v4.0 -> v4.1) - the new exe keeps the old ones
+#    1. bump the release version (or use -SetVersion 4.5.0)
 #    2. make sure PyInstaller is available
 #    3. bundle FFmpeg next to the exe (downloads it once if missing)
-#    4. build dist\<name>\<name>.exe  (runs on a PC without Python)
-#    5. zip it to release\<name>.zip for sharing
+#    4. build dist\SlideshowVideoCreator\SlideshowVideoCreator.exe
+#    5. build Windows/source ZIPs + update-manifest.json in release\
 #
 #  Optional:  build_exe.ps1 -SetVersion 4.5   (set an exact version)
 # =====================================================================
@@ -29,8 +29,6 @@ $ReleaseRoot = Join-Path $AppDir 'release'
 $FFmpegDir   = Join-Path $AppDir 'ffmpeg'
 $BaseName    = 'SlideshowVideoCreator'
 $FFmpegUrl   = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
-
-Set-Location -LiteralPath $AppDir
 
 function Step($t) { Write-Host ""; Write-Host "==> $t" -ForegroundColor Cyan }
 function Ok($t)   { Write-Host "    $t" -ForegroundColor Green }
@@ -62,9 +60,11 @@ if ($SetVersion) {
     $parts = $current.Split('.')
     $major = [int]$parts[0]
     $minor = if ($parts.Count -gt 1) { [int]$parts[1] } else { 0 }
-    $newVersion = "$major.$($minor + 1)"
+    $newVersion = "$major.$($minor + 1).0"
 }
-$Name = "${BaseName}_v$newVersion"
+if ($newVersion -notmatch '^\d+\.\d+(\.\d+)?$') { throw 'Use a numeric version such as 4.5.0.' }
+$Name = $BaseName
+$VersionResource = Join-Path $BuildRoot 'windows-version.txt'
 
 Write-Host ""
 Write-Host "===================================================" -ForegroundColor White
@@ -131,6 +131,11 @@ if (Test-Path -LiteralPath (Join-Path $FFmpegDir 'ffmpeg.exe')) {
     }
 }
 
+# Version must be written before bundling, so source, EXE and manifest agree.
+Set-Content -LiteralPath $VersionFile -Value ("{`n  `"version`": `"$newVersion`"`n}") -Encoding UTF8
+& $Python (Join-Path $AppDir 'tools\package_release.py') --version-resource $VersionResource
+if ($LASTEXITCODE -ne 0) { throw 'Could not generate Windows version information.' }
+
 # ------------------------------------------------------------ PyInstaller
 Step "Building $Name.exe (this takes a few minutes)"
 if (Test-Path -LiteralPath (Join-Path $DistRoot $Name)) {
@@ -145,6 +150,9 @@ $pyArgs = @(
     '--workpath', $BuildRoot,
     '--specpath', $BuildRoot,
     '--paths', $AppDir,
+    '--version-file', $VersionResource,
+    '--add-data', "$VersionFile;.",
+    '--add-data', "$(Join-Path $AppDir 'slideshow\update_install.ps1');slideshow",
     '--collect-all', 'tkinterdnd2',
     '--collect-all', 'imageio_ffmpeg',
     '--collect-all', 'cv2',
@@ -192,6 +200,7 @@ $distFolder = Join-Path $DistRoot $Name
 $distExe = Join-Path $distFolder "$Name.exe"
 if (-not (Test-Path -LiteralPath $distExe)) { throw "Build finished but $distExe was not found." }
 Ok "Built $distExe"
+Copy-Item -LiteralPath $VersionFile -Destination (Join-Path $distFolder 'build_version.json') -Force
 
 # ------------------------------------------------- copy FFmpeg next to exe
 Step 'Adding FFmpeg to the build'
@@ -204,16 +213,11 @@ if (Test-Path -LiteralPath (Join-Path $FFmpegDir 'ffmpeg.exe')) {
     Warn 'No ffmpeg\ folder - the exe was built without FFmpeg.'
 }
 
-# ------------------------------------------------------------------- zip
-Step 'Zipping for sharing'
-$zipPath = Join-Path $ReleaseRoot "$Name.zip"
-if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-Compress-Archive -Path (Join-Path $distFolder '*') -DestinationPath $zipPath -Force
-$mb = [math]::Round((Get-Item -LiteralPath $zipPath).Length / 1MB, 1)
-Ok "Created release\$Name.zip ($mb MB)"
-
-# ------------------------------------------------------------ save version
-Set-Content -LiteralPath $VersionFile -Value ("{`n  `"version`": `"$newVersion`"`n}") -Encoding UTF8
+# ------------------------------------------------------ release + updater ZIPs
+Step 'Packaging clean release and automatic-update assets'
+& $Python (Join-Path $AppDir 'tools\package_release.py') --windows-dir $distFolder --output-dir $ReleaseRoot
+if ($LASTEXITCODE -ne 0) { throw 'Release packaging failed.' }
+$zipPath = Join-Path $ReleaseRoot "${BaseName}_v${newVersion}_windows.zip"
 
 $nextMaj = [int]$newVersion.Split('.')[0]
 $nextMin = [int]$newVersion.Split('.')[1] + 1
