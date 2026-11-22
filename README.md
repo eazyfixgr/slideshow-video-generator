@@ -1,4 +1,4 @@
-# Slideshow Video Creator Pro — v4.5.0
+# Slideshow Video Creator Pro — v4.6.0
 
 Εφαρμογή για Windows (Python + Tkinter) που φτιάχνει αυτόματα **slideshow βίντεο MP4** από φωτογραφίες και βίντεο:
 ταιριάζει κάθε εικόνα στο κάδρο, προσθέτει κείμενο, εφέ μετάβασης, watermark και μουσική — για αγγελίες ακινήτων
