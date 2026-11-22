@@ -277,7 +277,7 @@ class ExportMixin(AudioExportMixin, ExportQualityMixin, ExportLivePreviewMixin):
                     if presentation["template"] != "legacy":
                         layout = presentation.get("text_layout")
                         auto_position_video = (
-                            (layout == "below") if layout else
+                            layout == "below" or
                             bool(self.settings.get("auto_position_videos", False)))
                         if auto_position_video and not presentation.get("text_layout"):
                             presentation = copy.deepcopy(presentation)
@@ -338,7 +338,7 @@ class ExportMixin(AudioExportMixin, ExportQualityMixin, ExportLivePreviewMixin):
                         txt_overlay.save(str(txt_p), "PNG")
                         layout = presentation.get("text_layout")
                         auto_position_video = (
-                            (layout == "below") if layout else
+                            layout == "below" or
                             bool(self.settings.get("auto_position_videos", False)))
                         if auto_position_video:
                             if self.settings.get("video_auto_position_fill", "panel") == "blur":

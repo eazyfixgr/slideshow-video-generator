@@ -22,6 +22,7 @@ import numpy as np
 from slideshow.ai_chat import apply_chat_edits, project_context
 from slideshow.app import SlideshowApp
 from slideshow.audio_engine import analyze_audio, automatic_music, mix_command
+from slideshow.rich_text import parse_markup
 from slideshow.slide_design import normalize_presentation
 from slideshow.timeline_model import (audio_clip, new_track, normalize_audio,
                                       scene_timing, source_time, trim_audio)
@@ -345,6 +346,57 @@ class ChatAndProjectTests(unittest.TestCase):
         self.assertTrue(layout)
         self.assertGreater(total, 0)
         self.assertEqual(len(clips), len(self.app.media_files))
+
+    def test_accent_after_global_size_wraps_inside_the_size_markers(self):
+        widget = tk.Text(self.root)
+        widget.insert("1.0", "%+3%Title\n\nContact%%\n")
+        start = widget.index("1.0+11c")
+        widget.tag_add(tk.SEL, start, "end-1c")
+        self.app._format_rich_selection(widget, "accent")
+        text = widget.get("1.0", "end-1c")
+        self.assertNotIn("%%##", text)
+        self.assertIn("##Contact##%%", text)
+        content = next(span for span in parse_markup(text) if "Contact" in span.text)
+        self.assertTrue(content.accent)
+        self.assertEqual(content.size_steps, 3)
+        widget.destroy()
+
+    def test_size_change_inside_global_size_affects_only_the_selection(self):
+        widget = tk.Text(self.root)
+        widget.insert("1.0", "%+3%Outer word%%")
+        start_off = widget.get("1.0", "end-1c").index("word")
+        widget.tag_add(tk.SEL, widget.index(f"1.0+{start_off}c"),
+                       widget.index(f"1.0+{start_off + 4}c"))
+        self.app._format_rich_selection(widget, "size", 1)
+        text = widget.get("1.0", "end-1c")
+        spans = {span.text.strip(): span.size_steps for span in parse_markup(text)
+                 if span.text.strip()}
+        self.assertEqual(spans.get("word"), 4)
+        self.assertEqual(spans.get("Outer"), 3)
+        widget.destroy()
+
+    def test_auto_position_video_preview_matches_the_renderer(self):
+        source = Image.new("RGB", (320, 180), "#305070")
+        edit = self.app._new_item("video", str(self.directory / "new-video.mp4"))[2]
+        edit["presentation"] = normalize_presentation({
+            "template": "lower_third", "text_layout": "overlay",
+            "text_position": "bottom"})
+        self.app.project_text_all = ""
+        self.app.settings.update({
+            "auto_position_videos": True,
+            "video_auto_position_fill": "blur",
+            "background_mode": "fit_and_move",
+            "cropping": False,
+            "watermark_enabled": False,
+        })
+        with patch.object(self.app, "_video_first_frame", return_value=source):
+            preview = self.app._preview_frame_image(
+                str(self.directory / "new-video.mp4"), "video", 270, 480, edit)
+        rendered, _overflow = self.app._render_design_frame(
+            source, edit, "video", 270, 480)
+        self.assertEqual(preview.size, rendered.size)
+        self.assertEqual(preview.convert("RGB").tobytes(),
+                         rendered.convert("RGB").tobytes())
 
     def test_automatic_music_plan_is_frozen_and_only_extended(self):
         first = self.directory / "one.wav"

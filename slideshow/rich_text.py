@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 _SIZE_OPEN = re.compile(r"%([+-]\d+)%")
+_SIZE_CLOSE = re.compile(r"%%")
 _MARKERS = re.compile(r"\*\*|##|%%|%[+-]\d+%")
 
 
@@ -33,64 +34,94 @@ def _merge(spans):
 
 
 def parse_markup(text, bold=False, accent=False, size_steps=0, base=0):
-    """Return source-offset spans with nested formatting applied."""
+    """Return source-offset spans with nested formatting applied.
+
+    Markers are scanned as a stream instead of recursively closing at the
+    first delimiter. This keeps nested size changes valid:
+    ``%+3%outside %+1%inside%% outside%%``.
+    """
     text = str(text or "")
     spans = []
+    bold_state, accent_state = bool(bold), bool(accent)
+    size_stack = [int(size_steps)]
     index = 0
-    while index < len(text):
-        bold_at = text.find("**", index)
-        accent_at = text.find("##", index)
-        size_match = _SIZE_OPEN.search(text, index)
-        starts = []
-        if bold_at >= 0:
-            starts.append((bold_at, "bold"))
-        if accent_at >= 0:
-            starts.append((accent_at, "accent"))
-        if size_match is not None:
-            starts.append((size_match.start(), "size"))
-        if not starts:
-            spans.append(RichSpan(text[index:], bold, accent, size_steps,
-                                  base + index, base + len(text)))
-            break
-        pos, kind = min(starts, key=lambda item: item[0])
-        if pos > index:
-            spans.append(RichSpan(text[index:pos], bold, accent, size_steps,
-                                  base + index, base + pos))
-        if kind == "bold":
-            close = text.find("**", pos + 2)
-            if close < 0:
-                spans.append(RichSpan("**", bold, accent, size_steps,
-                                      base + pos, base + pos + 2))
-                index = pos + 2
-                continue
-            spans.extend(parse_markup(text[pos + 2:close], True, accent,
-                                      size_steps, base + pos + 2))
-            index = close + 2
-        elif kind == "accent":
-            close = text.find("##", pos + 2)
-            if close < 0:
-                spans.append(RichSpan("##", bold, accent, size_steps,
-                                      base + pos, base + pos + 2))
-                index = pos + 2
-                continue
-            spans.extend(parse_markup(text[pos + 2:close], bold, True,
-                                      size_steps, base + pos + 2))
-            index = close + 2
+    for match in _MARKERS.finditer(text):
+        position = match.start()
+        if position > index:
+            spans.append(RichSpan(text[index:position], bold_state, accent_state,
+                                  size_stack[-1], base + index, base + position))
+        token = match.group(0)
+        if token == "**":
+            bold_state = not bold_state
+        elif token == "##":
+            accent_state = not accent_state
+        elif token == "%%":
+            if len(size_stack) > 1:
+                size_stack.pop()
         else:
-            close = text.find("%%", size_match.end())
-            if close < 0:
-                spans.append(RichSpan(size_match.group(0), bold, accent,
-                                      size_steps, base + pos, base + size_match.end()))
-                index = size_match.end()
-                continue
             try:
-                steps = int(size_match.group(1))
+                size_stack.append(size_stack[-1] + int(token[1:-1]))
             except ValueError:
-                steps = 0
-            spans.extend(parse_markup(text[size_match.end():close], bold, accent,
-                                      size_steps + steps, base + size_match.end()))
-            index = close + 2
+                pass
+        index = match.end()
+    if index < len(text):
+        spans.append(RichSpan(text[index:], bold_state, accent_state,
+                              size_stack[-1], base + index, base + len(text)))
     return _merge(spans)
+
+
+def trim_markup_selection(text, start, end):
+    """Move selection edges out of hidden formatting tokens.
+
+    A visual line selection often ends after an outer ``%%`` (or includes a
+    newline after it). Wrapping that range would put a new closing marker
+    outside the existing one and corrupt the markup.
+    """
+    text = str(text or "")
+    start = max(0, min(len(text), int(start)))
+    end = max(start, min(len(text), int(end)))
+    if start == end:
+        return start, end
+
+    def selected():
+        return text[start:end]
+
+    while start < end:
+        chunk = selected()
+        token = next((candidate for candidate in ("%[+-]\\d+%", "\\*\\*", "##")
+                      if re.match(candidate, chunk)), None)
+        if token is None:
+            break
+        marker = re.match(token, chunk).group(0)
+        if token == "##":
+            balanced = chunk.count("##") % 2 == 0
+        elif token == "\\*\\*":
+            balanced = chunk.count("**") % 2 == 0
+        else:
+            balanced = len(_SIZE_CLOSE.findall(chunk)) >= len(
+                _SIZE_OPEN.findall(chunk))
+        if balanced:
+            break
+        start += len(marker)
+
+    while start < end:
+        chunk = selected()
+        trailing = chunk.rstrip()
+        end -= len(chunk) - len(trailing)
+        if end <= start:
+            break
+        chunk = selected()
+        opens = len(_SIZE_OPEN.findall(chunk))
+        closes = len(_SIZE_CLOSE.findall(chunk))
+        if chunk.endswith("%%") and closes > opens:
+            end -= 2
+        elif chunk.endswith("**") and chunk.count("**") % 2:
+            end -= 2
+        elif chunk.endswith("##") and chunk.count("##") % 2:
+            end -= 2
+        else:
+            break
+    return start, end
 
 
 def markup_ranges(text):

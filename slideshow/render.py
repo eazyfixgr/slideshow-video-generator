@@ -139,9 +139,14 @@ class RenderMixin:
         """Render a still frame through the shared slide template engine."""
         presentation = self._presentation_for(edit)
         layout = presentation.get("text_layout")
-        below_media = ((layout == "below") if layout else
-                       bool(self.settings.get("auto_position_videos" if m_type == "video"
-                                              else "auto_position_photos", False)))
+        if m_type == "video":
+            below_media = (layout == "below" or
+                           bool(self.settings.get("auto_position_videos", False)))
+        else:
+            below_media = (layout == "below" if layout else
+                           bool(self.settings.get("auto_position_photos", False)))
+        if below_media and not layout:
+            presentation = {**presentation, "text_position": "bottom"}
         fields = self._presentation_fields(presentation, m_type, global_text)
         before = self._presentation_before_image(presentation, fallback=source)
         frame, overflow = compose_design_frame(

@@ -3,7 +3,7 @@
 import unittest
 
 from slideshow.rich_text import (markup_ranges, parse_markup, size_factor,
-                                 wrap_spans)
+                                 trim_markup_selection, wrap_spans)
 from slideshow.slide_design import _font
 
 
@@ -36,6 +36,31 @@ class RichTextTests(unittest.TestCase):
         self.assertTrue(any(segment[2] for line in lines for segment in line))
         self.assertTrue(any(segment[1].size > 20 for line in lines
                             for segment in line))
+
+    def test_nested_size_steps_are_added_to_the_surrounding_size(self):
+        spans = parse_markup("%+3%outside %+1%inside%% outside%%")
+        rendered = [(span.text.strip(), span.size_steps) for span in spans
+                    if span.text.strip()]
+        self.assertEqual(rendered, [("outside", 3), ("inside", 4),
+                                    ("outside", 3)])
+
+    def test_crossing_size_and_accent_markers_do_not_leak_hashes(self):
+        spans = parse_markup("%+3%##Contact%%##")
+        content = next(span for span in spans if span.text.strip())
+        self.assertEqual(content.text, "Contact")
+        self.assertTrue(content.accent)
+        self.assertEqual(content.size_steps, 3)
+
+    def test_trim_selection_leaves_outer_closing_markers_out(self):
+        text = "%+3%Title\n\nContact%%\n"
+        start = text.index("Contact")
+        start, end = trim_markup_selection(text, start, len(text))
+        self.assertEqual(text[start:end], "Contact")
+
+    def test_trim_selection_keeps_a_balanced_size_span(self):
+        text = "%+1%whole%%"
+        self.assertEqual(trim_markup_selection(text, 0, len(text)),
+                         (0, len(text)))
 
     def test_size_factor_steps(self):
         self.assertAlmostEqual(size_factor(1), 1.1)

@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from .rich_text import (markup_ranges, parse_markup, size_factor,
-                        strip_markup)
+                        strip_markup, trim_markup_selection)
 from .slide_design import legacy_text, normalize_presentation
 from .ui_theme import MODERN_PALETTE as P
 from .ui_widgets import flat_button
@@ -242,10 +242,16 @@ class CaptionInspectorMixin:
                 self._refresh_rich_tags(widget)
 
     def _format_rich_selection(self, widget, kind, delta=1):
+        full = widget.get("1.0", "end-1c")
         try:
-            start = widget.index(tk.SEL_FIRST)
-            end = widget.index(tk.SEL_LAST)
-            selected = widget.get(start, end)
+            raw_start = widget.index(tk.SEL_FIRST)
+            raw_end = widget.index(tk.SEL_LAST)
+            start_off = len(widget.get("1.0", raw_start))
+            end_off = len(widget.get("1.0", raw_end))
+            start_off, end_off = trim_markup_selection(full, start_off, end_off)
+            start = widget.index(f"1.0+{start_off}c")
+            end = widget.index(f"1.0+{end_off}c")
+            selected = full[start_off:end_off]
         except tk.TclError:
             start = end = widget.index(tk.INSERT)
             selected = ""

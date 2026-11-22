@@ -120,8 +120,15 @@ class PreviewMixin:
 
 
     def _render_design_fitmove_preview(self, img, edit, m_type, w, h, presentation, progress=0.0):
-        """First Fit-and-Move frame for design templates, as the export starts."""
-        if self._slide_background_mode(presentation) != "fit_and_move":
+        """First frame for design templates, matching the export layout."""
+        layout = presentation.get("text_layout")
+        if m_type == "video":
+            below_media = (layout == "below" or
+                           bool(self.settings.get("auto_position_videos", False)))
+        else:
+            below_media = (layout == "below" if layout else
+                           bool(self.settings.get("auto_position_photos", False)))
+        if below_media or self._slide_background_mode(presentation) != "fit_and_move":
             return self._render_design_frame(img, edit, m_type, w, h)[0]
         fields = self._presentation_fields(presentation, m_type)
         before = self._presentation_before_image(presentation, fallback=img)
@@ -180,7 +187,7 @@ class PreviewMixin:
                     first, edit, "video", w, h, presentation)
             else:
                 layout = presentation.get("text_layout")
-                below = ((layout == "below") if layout else
+                below = (layout == "below" or
                          bool(self.settings.get("auto_position_videos", False)))
                 if below:
                     frame = self._render_auto_position_video(first, presentation, text, w, h)

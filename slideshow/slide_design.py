@@ -1,4 +1,4 @@
-﻿"""Per-slide presentation data and reusable, resolution-independent templates.
+"""Per-slide presentation data and reusable, resolution-independent templates.
 
 The compositor deliberately keeps the source media separate from its graphic
 layers.  A still image and an FFmpeg video frame use the same geometry and
@@ -442,8 +442,7 @@ def render_design_layers(width, height, presentation, fields, before_image=None,
         "navy_gold": "below", "intro_outro": "below",
         "cinematic": "overlay", "lower_third": "overlay", "legacy": "overlay",
     }.get(template, "overlay")
-    below_media = ((layout == "below") if explicit_layout is not None
-                   else bool(auto_position_video or layout == "below"))
+    below_media = bool(auto_position_video) or layout == "below"
     opacity = p.get("panel_opacity")
     panel_alpha = None if opacity is None else max(0, min(255, round(float(opacity) * 2.55)))
     width_pct = int(p.get("panel_width_pct") or 0)
