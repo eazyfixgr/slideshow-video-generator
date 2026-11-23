@@ -24,8 +24,10 @@ from slideshow.app import SlideshowApp
 from slideshow.audio_engine import analyze_audio, automatic_music, mix_command
 from slideshow.rich_text import parse_markup
 from slideshow.slide_design import normalize_presentation
-from slideshow.timeline_model import (audio_clip, new_track, normalize_audio,
-                                      scene_timing, source_time, trim_audio)
+from slideshow.timeline_model import (audio_clip, audio_segments, cut_audio_edge,
+                                      new_track, normalize_audio, remove_audio_range,
+                                      scene_timing, set_audio_segments, source_time,
+                                      trim_audio)
 from slideshow.ui_storyboard import ORIGIN, AUDIO_TOP, LANE
 from slideshow.ui_audio_tracks import AudioTracksMixin
 from slideshow.voice_recording import input_devices
@@ -62,6 +64,42 @@ class TimelineModelTests(unittest.TestCase):
         changed = trim_audio(clip, "right", 100, 9)
         self.assertEqual(changed["duration"], 7)
         self.assertEqual(clip["duration"], 3)
+
+    def test_audio_segment_cuts_remove_parts_from_start_middle_and_end(self):
+        clip = audio_clip("music.wav", 5, 4, offset=2)
+        self.assertTrue(set_audio_segments(clip, [[2, 3], [7, 2]], 12))
+        self.assertEqual((clip["offset"], clip["duration"]), (2, 5))
+        ranges = remove_audio_range(audio_segments(clip), 3, 4, 12)
+        self.assertEqual(ranges, [[2, 1], [4, 1], [7, 2]])
+        ranges = cut_audio_edge(ranges, "start", .5, 12)
+        ranges = cut_audio_edge(ranges, "end", .5, 12)
+        self.assertEqual(ranges, [[2.5, .5], [4, 1], [7, 1.5]])
+        self.assertAlmostEqual(sum(length for _start, length in ranges), 3)
+
+    def test_segmented_audio_normalization_round_trips_and_compacts(self):
+        clip = audio_clip("music.wav", 5, 0, offset=0)
+        set_audio_segments(clip, [[0, .2], [.8, .2]], 1)
+        audio = normalize_audio({"mode": "manual", "tracks": [
+            new_track("Music", clips=[clip])]})
+        saved = audio["tracks"][0]["clips"][0]
+        self.assertEqual([start for start, _length in saved["segments"]], [0, .8])
+        self.assertEqual([round(length, 6) for _start, length in saved["segments"]],
+                         [.2, .2])
+        self.assertAlmostEqual(saved["duration"], .4)
+        self.assertEqual(saved["offset"], 0)
+
+    def test_mix_command_compacts_deleted_audio_ranges(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source, output = root / "tone.wav", root / "mix.wav"
+            tone(source)
+            clip = audio_clip(str(source), .4, 0, segments=[[0, .2], [.8, .2]])
+            run = subprocess.run(mix_command([new_track("Music", clips=[clip])], .4, output),
+                                 capture_output=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stderr.decode(errors="replace"))
+            with wave.open(str(output)) as stream:
+                rate, frames = stream.getframerate(), stream.getnframes()
+            self.assertAlmostEqual(frames / rate, .4, places=2)
 
     def test_audio_normalization_preserves_tracks_and_rejects_non_finite_numbers(self):
         clip = audio_clip("x.wav", 3, 2, volume_db=float("nan"))

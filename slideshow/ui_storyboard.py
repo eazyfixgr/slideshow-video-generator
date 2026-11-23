@@ -1,4 +1,4 @@
-﻿"""Time-scaled visual/audio timeline, replacing the equal-width storyboard strip."""
+"""Time-scaled visual/audio timeline, replacing the equal-width storyboard strip."""
 
 import copy
 import threading
@@ -9,7 +9,7 @@ from tkinter import ttk
 from .audio_workspace import AudioWorkspaceMixin
 from .deps import ImageTk
 from .slide_design import normalize_presentation
-from .timeline_model import trim_audio
+from .timeline_model import audio_segments, trim_audio
 from .ui_audio_tracks import AudioTracksMixin
 from .ui_timeline_playback import TimelinePlaybackMixin, timecode
 from .ui_voiceover import VoiceoverMixin
@@ -178,13 +178,26 @@ class StoryboardMixin(AudioWorkspaceMixin, AudioTracksMixin, TimelinePlaybackMix
                 info = self._timeline_waveforms.get(clip["path"])
                 if info:
                     peaks = info["peaks"]
-                    count = max(1, min(350, int((x2 - x1) / 3)))
-                    for bin_index in range(count):
-                        source_at = clip["offset"] + clip["duration"] * bin_index / count
-                        peak = peaks[min(len(peaks)-1, int(source_at / max(.01, info["duration"]) * len(peaks)))]
-                        x = x1 + (x2-x1) * bin_index / count
-                        half = min(16, peak * 28)
-                        canvas.create_line(x, y + 29 - half, x, y + 29 + half, fill=P["good"], tags=tag)
+                    ranges = audio_segments(clip, info["duration"])
+                    played = sum(length for _start, length in ranges) or clip["duration"]
+                    drawn = 0.0
+                    for segment_start, segment_length in ranges:
+                        segment_x1 = x1 + (x2 - x1) * drawn / played
+                        segment_x2 = x1 + (x2 - x1) * (drawn + segment_length) / played
+                        segment_width = max(1.0, segment_x2 - segment_x1)
+                        count = max(1, min(350, int(segment_width / 3)))
+                        for bin_index in range(count):
+                            source_at = segment_start + segment_length * bin_index / count
+                            peak = peaks[min(len(peaks)-1, int(
+                                source_at / max(.01, info["duration"]) * len(peaks)))]
+                            x = segment_x1 + segment_width * bin_index / count
+                            half = min(16, peak * 28)
+                            canvas.create_line(x, y + 29 - half, x, y + 29 + half,
+                                               fill=P["good"], tags=tag)
+                        if drawn:
+                            canvas.create_line(segment_x1, y + 5, segment_x1, y + LANE - 9,
+                                               fill=P["accent"], dash=(2, 3), tags=tag)
+                        drawn += segment_length
                 if x2 - x1 > 45:
                     canvas.create_text(x1 + 4, y + 12, text=Path(clip["path"]).name[:max(4, int((x2-x1)/6))],
                                        anchor="w", fill=P["text"], font=("Segoe UI", 8), tags=tag)

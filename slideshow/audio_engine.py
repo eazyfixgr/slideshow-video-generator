@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .timeline_model import active_audio_clips, audio_clip, new_track
+from .timeline_model import active_audio_clips, audio_clip, audio_segments, new_track
 
 FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -125,16 +125,39 @@ def mix_command(tracks, duration, output, video_clips=None):
             raise FileNotFoundError(f"Λείπει αρχείο ήχου: {clip['path']}")
         index = len(labels)
         length = min(clip["duration"], duration - clip["start"])
+        ranges, remaining = [], length
+        for source_start, source_length in audio_segments(clip):
+            take = min(source_length, remaining)
+            if take > .001:
+                ranges.append((source_start, take))
+                remaining -= take
+            if remaining <= .001:
+                break
+        if not ranges:
+            continue
         inputs += ["-i", str(clip["path"])]
-        chain = (f"[{index}:a]atrim=start={clip.get('offset', 0):.6f}:duration={length:.6f},"
-                 "asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,"
-                 f"volume={float(clip.get('volume_db', 0)):.3f}dB")
-        fade_in = min(float(clip.get("fade_in", 0)), length)
-        fade_out = min(float(clip.get("fade_out", 0)), length)
+        segment_labels = []
+        for segment_index, (source_start, source_length) in enumerate(ranges):
+            label = f"[c{index}_{segment_index}]"
+            graph.append(
+                f"[{index}:a]atrim=start={source_start:.6f}:duration={source_length:.6f},"
+                "asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo"
+                f"{label}")
+            segment_labels.append(label)
+        if len(segment_labels) == 1:
+            chain = segment_labels[0]
+        else:
+            chain = "".join(segment_labels) + f"concat=n={len(segment_labels)}:v=0:a=1[joined{index}]"
+            graph.append(chain)
+            chain = f"[joined{index}]"
+        played = sum(segment_length for _start, segment_length in ranges)
+        chain += f"volume={float(clip.get('volume_db', 0)):.3f}dB"
+        fade_in = min(float(clip.get("fade_in", 0)), played)
+        fade_out = min(float(clip.get("fade_out", 0)), played)
         if fade_in:
             chain += f",afade=t=in:st=0:d={fade_in:.6f}"
         if fade_out:
-            chain += f",afade=t=out:st={length-fade_out:.6f}:d={fade_out:.6f}"
+            chain += f",afade=t=out:st={played-fade_out:.6f}:d={fade_out:.6f}"
         delay = max(0, round(clip["start"] * 48000))
         chain += f",adelay={delay}S:all=1[a{index}]"
         labels.append(f"[a{index}]")

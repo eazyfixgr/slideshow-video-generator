@@ -28,6 +28,95 @@ def audio_clip(path, duration, start=0.0, **values):
             "fade_in": 0.0, "fade_out": 0.0, **values}
 
 
+def _clean_segments(values, source_duration=None):
+    result = []
+    for item in values if isinstance(values, list) else []:
+        try:
+            start, duration = float(item[0]), float(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if not math.isfinite(start) or not math.isfinite(duration):
+            continue
+        start = max(0.0, start)
+        duration = max(0.0, duration)
+        if source_duration is not None:
+            duration = min(duration, max(0.0, float(source_duration) - start))
+        if duration < .01:
+            continue
+        if result and abs(result[-1][0] + result[-1][1] - start) <= .001:
+            result[-1][1] += duration
+        else:
+            result.append([start, duration])
+    return result
+
+
+def audio_segments(clip, source_duration=None):
+    """Source ranges that remain in one timeline audio clip."""
+    raw = clip.get("segments")
+    segments = _clean_segments(raw, source_duration) if isinstance(raw, list) else []
+    if segments:
+        return segments
+    offset = number(clip.get("offset"), 0)
+    duration = number(clip.get("duration"), .05, .05)
+    return _clean_segments([[offset, duration]], source_duration)
+
+
+def set_audio_segments(clip, segments, source_duration=None):
+    cleaned = _clean_segments(segments, source_duration)
+    if not cleaned:
+        return False
+    clip["segments"] = cleaned
+    clip["offset"] = cleaned[0][0]
+    clip["duration"] = sum(duration for _start, duration in cleaned)
+    return True
+
+
+def remove_audio_range(segments, start, end, source_duration=None):
+    """Remove a source-time range; the rest closes up without a silent hole."""
+    source = _clean_segments(segments, source_duration)
+    start, end = sorted((max(0.0, float(start)), max(0.0, float(end))))
+    result = []
+    for offset, duration in source:
+        tail = offset + duration
+        if end <= offset or start >= tail:
+            result.append([offset, duration])
+            continue
+        if start > offset:
+            result.append([offset, start - offset])
+        if end < tail:
+            result.append([end, tail - end])
+    return _clean_segments(result, source_duration)
+
+
+def cut_audio_edge(segments, edge, seconds, source_duration=None):
+    """Remove ``seconds`` from the current kept beginning or end."""
+    source = _clean_segments(segments, source_duration)
+    seconds = max(0.0, float(seconds))
+    if not source or seconds <= 0:
+        return source
+    if edge == "start":
+        remaining = seconds
+        while source and remaining > 0:
+            offset, duration = source[0]
+            if remaining >= duration - .001:
+                remaining -= duration
+                source.pop(0)
+            else:
+                source[0] = [offset + remaining, duration - remaining]
+                remaining = 0
+    else:
+        remaining = seconds
+        while source and remaining > 0:
+            offset, duration = source[-1]
+            if remaining >= duration - .001:
+                remaining -= duration
+                source.pop()
+            else:
+                source[-1] = [offset, duration - remaining]
+                remaining = 0
+    return _clean_segments(source, source_duration)
+
+
 def normalize_audio(raw):
     if not isinstance(raw, dict):
         return empty_audio()
@@ -55,6 +144,11 @@ def normalize_audio(raw):
                         volume_db=number(item.get("volume_db"), 0, -60, 20),
                         fade_in=number(item.get("fade_in")), fade_out=number(item.get("fade_out")),
                         recording=bool(item.get("recording")))
+            segments = _clean_segments(item.get("segments"))
+            if segments:
+                clip["segments"] = segments
+                clip["offset"] = segments[0][0]
+                clip["duration"] = sum(duration for _start, duration in segments)
             track["clips"].append(clip)
         result["tracks"].append(track)
     return result
@@ -103,13 +197,36 @@ def source_time(segments, local_time):
 
 def trim_audio(clip, edge, delta, source_duration):
     result = copy.deepcopy(clip)
+    if not isinstance(result.get("segments"), list) or not result["segments"]:
+        if edge == "left":
+            delta = max(-min(result["start"], result["offset"]),
+                        min(delta, result["duration"] - .05))
+            result["start"] += delta
+            result["offset"] += delta
+            result["duration"] -= delta
+        else:
+            result["duration"] = max(.05, min(result["duration"] + delta,
+                                              source_duration - result["offset"]))
+        return result
+
+    segments = audio_segments(result, source_duration)
+    total = sum(duration for _start, duration in segments)
     if edge == "left":
-        delta = max(-min(result["start"], result["offset"]),
-                    min(delta, result["duration"] - .05))
-        result["start"] += delta
-        result["offset"] += delta
-        result["duration"] -= delta
+        delta = max(-min(result["start"], segments[0][0]), min(delta, total - .05))
+        result["start"] = max(0.0, result["start"] + delta)
+        if delta >= 0:
+            segments = cut_audio_edge(segments, "start", delta, source_duration)
+        else:
+            extension = -delta
+            segments[0][0] = max(0.0, segments[0][0] - extension)
+            segments[0][1] += extension
     else:
-        result["duration"] = max(.05, min(result["duration"] + delta,
-                                          source_duration - result["offset"]))
+        if delta >= 0:
+            last = segments[-1]
+            extend = max(0.0, min(delta, source_duration - last[0] - last[1]))
+            last[1] += extend
+        else:
+            segments = cut_audio_edge(segments, "end", -delta, source_duration)
+    if segments:
+        set_audio_segments(result, segments, source_duration)
     return result
